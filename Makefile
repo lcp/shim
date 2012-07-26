@@ -21,11 +21,12 @@ CFLAGS		= -ggdb -O0 -fno-stack-protector -fno-strict-aliasing -fpic -fshort-wcha
 ifeq ($(ARCH),x86_64)
 	CFLAGS	+= -DEFI_FUNCTION_WRAPPER
 endif
+CFLAGS		+= -DSUSE_CHECKSUM
 LDFLAGS		= -nostdlib -znocombreloc -T $(EFI_LDS) -shared -Bsymbolic -L$(EFI_PATH) -L$(LIB_PATH) -LCryptlib -LCryptlib/OpenSSL $(EFI_CRT_OBJS)
 
 TARGET		= shim.efi
 OBJS		= shim.o shim.so
-SOURCES		= shim.c shim.h signature.h PeImage.h cert.h
+SOURCES		= shim.c shim.h signature.h PeImage.h cert.h checksum.h
 
 all: $(TARGET)
 

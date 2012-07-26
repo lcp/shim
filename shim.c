@@ -51,6 +51,10 @@ static EFI_STATUS (EFIAPI *entry_point) (EFI_HANDLE image_handle, EFI_SYSTEM_TAB
 
 #include "cert.h"
 
+#ifdef SUSE_CHECKSUM
+	#include "checksum.h"
+#endif
+
 #define EFI_IMAGE_SECURITY_DATABASE_GUID { 0xd719b2cb, 0x3d3a, 0x4596, { 0xa3, 0xbc, 0xda, 0xd0, 0x0e, 0x67, 0x65, 0x6f }}
 
 typedef enum {
@@ -552,6 +556,118 @@ done:
 	return status;
 }
 
+#ifdef SUSE_CHECKSUM
+static int prompt_to_enroll_checksum (UINT8 checksum[SHA256_DIGEST_SIZE])
+{
+	EFI_GUID global_var = EFI_GLOBAL_VARIABLE;
+	EFI_INPUT_KEY key;
+	UINTN EventIndex;
+	EFI_STATUS efi_status;
+
+	Print(L"Enroll the checksum? (y/N): ");
+	uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey, &EventIndex);
+	uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &key);
+
+	if (key.UnicodeChar == 'Y' || key.UnicodeChar == 'y') {
+		Print(L"Y\n");
+
+		efi_status = uefi_call_wrapper(RT->SetVariable, 5, L"SUSEChecksum", &global_var,
+					       EFI_VARIABLE_NON_VOLATILE
+					       | EFI_VARIABLE_BOOTSERVICE_ACCESS,
+					       SHA256_DIGEST_SIZE, checksum);
+		if (efi_status != EFI_SUCCESS) {
+			Print(L"Failed to set variable %d\n", efi_status);
+			return 0;
+		}
+
+		return 1;
+	}
+
+	Print(L"N\n");
+
+	return 0;
+}
+
+static int checksum_verification (UINT8 checksum[SHA256_DIGEST_SIZE])
+{
+	EFI_GUID global_var = EFI_GLOBAL_VARIABLE;
+	UINT8 alt_checksum[SHA256_DIGEST_SIZE];
+	UINTN alt_size = sizeof (alt_checksum);
+	EFI_STATUS efi_status;
+
+	/* Check the vendor checksum */
+	if (CompareMem (vendor_checksum, checksum, SHA256_DIGEST_SIZE) == 0)
+		return 2;
+
+	/* Check the alternative checksum */
+	efi_status = uefi_call_wrapper(RT->GetVariable, 5, L"SUSEChecksum", &global_var,
+				       NULL, &alt_size, alt_checksum);
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"No alternative checksum\n");
+		if (prompt_to_enroll_checksum(checksum))
+			return 1;
+		return 0;
+	}
+
+	Print(L"Using alternative checksum\n");
+	if (CompareMem (alt_checksum, checksum, SHA256_DIGEST_SIZE) == 0)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * Check that the checksum is valid and matches the binary
+ */
+static EFI_STATUS verify_buffer_checksum (char *data, int datasize)
+{
+	unsigned int ctxsize;
+	void *ctx = NULL;
+	UINT8 hash[SHA256_DIGEST_SIZE];
+	EFI_STATUS status = EFI_ACCESS_DENIED;
+
+	ctxsize = Sha256GetContextSize();
+	ctx = AllocatePool(ctxsize);
+
+	if (!ctx) {
+		Print(L"Unable to allocate memory for hash context\n");
+		return EFI_OUT_OF_RESOURCES;
+	}
+
+	if (!Sha256Init(ctx)) {
+		Print(L"Unable to initialise hash\n");
+		status = EFI_OUT_OF_RESOURCES;
+		goto done;
+	}
+
+	/* Hash start to checksum */
+	if (!(Sha256Update(ctx, data, datasize))) {
+		Print(L"Unable to generate hash\n");
+		status = EFI_OUT_OF_RESOURCES;
+		goto done;
+	}
+
+	if (!(Sha256Final(ctx, hash))) {
+		Print(L"Unable to finalise hash\n");
+		status = EFI_OUT_OF_RESOURCES;
+		goto done;
+	}
+
+	if (!checksum_verification (hash)) {
+		Print(L"Invalid checksum\n");
+		status = EFI_ACCESS_DENIED;
+	} else {
+		status = EFI_SUCCESS;
+	}
+
+done:
+	if (ctx)
+		FreePool(ctx);
+
+	return status;
+}
+#endif
+
 /*
  * Read the binary header and grab appropriate information from it
  */
@@ -588,6 +704,7 @@ static EFI_STATUS read_header(void *data,
 	context->NumberOfRvaAndSizes = PEHdr->Pe32Plus.OptionalHeader.NumberOfRvaAndSizes;
 	context->NumberOfSections = PEHdr->Pe32.FileHeader.NumberOfSections;
 	context->FirstSection = (EFI_IMAGE_SECTION_HEADER *)((char *)PEHdr + PEHdr->Pe32.FileHeader.SizeOfOptionalHeader + sizeof(UINT32) + sizeof(EFI_IMAGE_FILE_HEADER));
+#ifndef SUSE_CHECKSUM
 	context->SecDir = (EFI_IMAGE_DATA_DIRECTORY *) &PEHdr->Pe32Plus.OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_SECURITY];
 
 	if (context->SecDir->VirtualAddress >= context->ImageSize) {
@@ -599,6 +716,7 @@ static EFI_STATUS read_header(void *data,
 		Print(L"Empty security header\n");
 		return EFI_INVALID_PARAMETER;
 	}
+#endif
 
 	return EFI_SUCCESS;
 }
@@ -622,7 +740,11 @@ static EFI_STATUS handle_grub (void *data, int datasize, EFI_LOADED_IMAGE *li)
 	}
 
 	if (secure_mode ()) {
+#ifdef SUSE_CHECKSUM
+		efi_status = verify_buffer_checksum(data, datasize);
+#else
 		efi_status = verify_buffer(data, datasize, &context, 0);
+#endif
 
 		if (efi_status != EFI_SUCCESS) {
 			Print(L"Verification failed\n");
