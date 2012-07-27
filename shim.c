@@ -564,6 +564,7 @@ static int prompt_to_enroll_checksum (UINT8 checksum[SHA256_DIGEST_SIZE])
 	UINTN EventIndex;
 	EFI_STATUS efi_status;
 
+	/* TODO Show a warning to notify the user that the bootloader has bee changed. */
 	Print(L"Enroll the checksum? (y/N): ");
 	uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey, &EventIndex);
 	uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &key);
@@ -655,7 +656,10 @@ static EFI_STATUS verify_buffer_checksum (char *data, int datasize)
 
 	if (!checksum_verification (hash)) {
 		Print(L"Invalid checksum\n");
-		status = EFI_ACCESS_DENIED;
+		if (prompt_to_enroll_checksum(checksum))
+			status = EFI_SUCCESS;
+		else
+			status = EFI_ACCESS_DENIED;
 	} else {
 		status = EFI_SUCCESS;
 	}
