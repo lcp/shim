@@ -557,14 +557,51 @@ done:
 }
 
 #ifdef SUSE_CHECKSUM
+static VOID SetCHAR16 (CHAR16 *str, UINT32 len, CHAR16 c)
+{
+	UINT32 i;
+	for (i = 0; i < len; i++)
+		str[i] = c;
+}
+
 static int prompt_to_enroll_checksum (UINT8 checksum[SHA256_DIGEST_SIZE])
 {
 	EFI_GUID global_var = EFI_GLOBAL_VARIABLE;
+	SIMPLE_TEXT_OUTPUT_INTERFACE *conout;
 	EFI_INPUT_KEY key;
 	UINTN EventIndex;
 	EFI_STATUS efi_status;
+	UINTN cols, rows;
+	CHAR16 *line;
 
-	/* TODO Show a warning to notify the user that the bootloader has bee changed. */
+	conout = systab->ConOut;
+        uefi_call_wrapper(conout->QueryMode, 4, conout, conout->Mode->Mode, &cols, &rows);
+        uefi_call_wrapper(conout->SetAttribute, 2, conout, EFI_YELLOW | EFI_BACKGROUND_RED);
+        line = AllocatePool ((cols+1)*sizeof(CHAR16));
+
+	line[cols] = L'\0';
+	SetCHAR16 (line, cols, BOXDRAW_HORIZONTAL);
+	uefi_call_wrapper(conout->OutputString, 2, conout, line);
+
+	SetCHAR16 (line, cols, L' ');
+	StrCpy (line, L"WARNING!! The bootloader is unverified!!!");
+	line[41] = L' ';
+	uefi_call_wrapper(conout->OutputString, 2, conout, line);
+
+	SetCHAR16 (line, cols, L' ');
+	StrCpy (line, L"WARNING!! Enrolling an arbitrary checksum may risk your system!!!");
+	line[65] = L' ';
+	uefi_call_wrapper(conout->OutputString, 2, conout, line);
+
+	SetCHAR16 (line, cols, BOXDRAW_HORIZONTAL);
+	uefi_call_wrapper(conout->OutputString, 2, conout, line);
+
+	uefi_call_wrapper(conout->SetAttribute, 2, conout, EFI_LIGHTGRAY | EFI_BACKGROUND_BLACK);
+	SetCHAR16 (line, cols, L' ');
+	uefi_call_wrapper(conout->OutputString, 2, conout, line);
+
+	FreePool (line);
+
 	Print(L"Enroll the checksum? (y/N): ");
 	uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey, &EventIndex);
 	uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &key);
