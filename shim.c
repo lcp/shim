@@ -601,8 +601,7 @@ static int checksum_verification (UINT8 checksum[SHA256_DIGEST_SIZE])
 		return 2;
 
 	/* Check the alternative checksum */
-	efi_status = uefi_call_wrapper(RT->GetVariable, 5, L"SUSEChecksum", &global_var,
-				       NULL, &alt_size, alt_checksum);
+	efi_status = get_variable (L"SUSEChecksum", global_var, &alt_size, (void *)alt_checksum);
 	if (efi_status != EFI_SUCCESS) {
 		Print(L"No alternative checksum\n");
 		if (prompt_to_enroll_checksum(checksum))
