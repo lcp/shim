@@ -692,7 +692,7 @@ static EFI_STATUS verify_buffer_checksum (char *data, int datasize)
 
 	if (!checksum_verification (hash)) {
 		Print(L"Invalid checksum\n");
-		if (prompt_to_enroll_checksum(checksum))
+		if (prompt_to_enroll_checksum(hash))
 			status = EFI_SUCCESS;
 		else
 			status = EFI_ACCESS_DENIED;
