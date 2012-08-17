@@ -701,6 +701,9 @@ static EFI_STATUS read_header(void *data,
 	context->FirstSection = (EFI_IMAGE_SECTION_HEADER *)((char *)PEHdr + PEHdr->Pe32.FileHeader.SizeOfOptionalHeader + sizeof(UINT32) + sizeof(EFI_IMAGE_FILE_HEADER));
 	context->SecDir = (EFI_IMAGE_DATA_DIRECTORY *) &PEHdr->Pe32Plus.OptionalHeader.DataDirectory[EFI_IMAGE_DIRECTORY_ENTRY_SECURITY];
 
+	if (!secure_mode())
+		return EFI_SUCCESS;
+
 	if (context->SecDir->VirtualAddress >= context->ImageSize) {
 		Print(L"Malformed security header\n");
 		return EFI_INVALID_PARAMETER;
