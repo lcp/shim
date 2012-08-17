@@ -391,6 +391,79 @@ done:
 	return efi_status;
 }
 
+static EFI_STATUS read_file (EFI_FILE *file, void **data, int *datasize)
+{
+	EFI_GUID file_info_id = EFI_FILE_INFO_ID;
+	EFI_STATUS efi_status;
+	EFI_FILE_INFO *fileinfo = NULL;
+	UINTN buffersize = sizeof(EFI_FILE_INFO);
+
+	fileinfo = AllocatePool(buffersize);
+
+	if (!fileinfo) {
+		Print(L"Unable to allocate file info buffer\n");
+		efi_status = EFI_OUT_OF_RESOURCES;
+		goto error;
+	}
+
+	efi_status = uefi_call_wrapper(file->GetInfo, 4, file, &file_info_id,
+				       &buffersize, fileinfo);
+
+	if (efi_status == EFI_BUFFER_TOO_SMALL) {
+		fileinfo = AllocatePool(buffersize);
+		if (!fileinfo) {
+			Print(L"Unable to allocate file info buffer\n");
+			efi_status = EFI_OUT_OF_RESOURCES;
+			goto error;
+		}
+		efi_status = uefi_call_wrapper(file->GetInfo, 4, file,
+					       &file_info_id, &buffersize,
+					       fileinfo);
+	}
+
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"Unable to get file info\n");
+		goto error;
+	}
+
+	buffersize = fileinfo->FileSize;
+
+	*data = AllocatePool(buffersize);
+
+	if (!*data) {
+		Print(L"Unable to allocate file buffer\n");
+		efi_status = EFI_OUT_OF_RESOURCES;
+		goto error;
+	}
+	efi_status = uefi_call_wrapper(file->Read, 3, file, &buffersize,
+				       *data);
+
+	if (efi_status == EFI_BUFFER_TOO_SMALL) {
+		FreePool(*data);
+		*data = AllocatePool(buffersize);
+		efi_status = uefi_call_wrapper(file->Read, 3, file,
+					       &buffersize, *data);
+	}
+
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"Unexpected return from initial read: %x, buffersize %x\n", efi_status, buffersize);
+		goto error;
+	}
+
+	*datasize = buffersize;
+
+	return EFI_SUCCESS;
+error:
+	if (*data) {
+		FreePool(*data);
+		*data = NULL;
+	}
+	if (fileinfo)
+		FreePool(fileinfo);
+	return efi_status;
+
+}
+
 /*
  * Check that the signature is valid and matches the binary
  */
@@ -773,11 +846,8 @@ error:
 static EFI_STATUS load_grub (EFI_LOADED_IMAGE *li, void **data,
 			     int *datasize, CHAR16 *PathName)
 {
-	EFI_GUID file_info_id = EFI_FILE_INFO_ID;
 	EFI_STATUS efi_status;
-	EFI_FILE_INFO *fileinfo = NULL;
 	EFI_FILE *grub;
-	UINTN buffersize = sizeof(EFI_FILE_INFO);
 
 	efi_status = open_file(li, PathName, &grub, EFI_FILE_MODE_READ);
 
@@ -786,70 +856,14 @@ static EFI_STATUS load_grub (EFI_LOADED_IMAGE *li, void **data,
 		goto error;
 	}
 
-	fileinfo = AllocatePool(buffersize);
-
-	if (!fileinfo) {
-		Print(L"Unable to allocate file info buffer\n");
-		efi_status = EFI_OUT_OF_RESOURCES;
-		goto error;
-	}
-
-	efi_status = uefi_call_wrapper(grub->GetInfo, 4, grub, &file_info_id,
-				       &buffersize, fileinfo);
-
-	if (efi_status == EFI_BUFFER_TOO_SMALL) {
-		fileinfo = AllocatePool(buffersize);
-		if (!fileinfo) {
-			Print(L"Unable to allocate file info buffer\n");
-			efi_status = EFI_OUT_OF_RESOURCES;
-			goto error;
-		}
-		efi_status = uefi_call_wrapper(grub->GetInfo, 4, grub,
-					       &file_info_id, &buffersize,
-					       fileinfo);
-	}
+	efi_status = read_file(grub, data, datasize);
 
 	if (efi_status != EFI_SUCCESS) {
-		Print(L"Unable to get file info\n");
+		Print(L"Unable to read file\n");
 		goto error;
 	}
 
-	buffersize = fileinfo->FileSize;
-
-	*data = AllocatePool(buffersize);
-
-	if (!*data) {
-		Print(L"Unable to allocate file buffer\n");
-		efi_status = EFI_OUT_OF_RESOURCES;
-		goto error;
-	}
-	efi_status = uefi_call_wrapper(grub->Read, 3, grub, &buffersize,
-				       *data);
-
-	if (efi_status == EFI_BUFFER_TOO_SMALL) {
-		FreePool(*data);
-		*data = AllocatePool(buffersize);
-		efi_status = uefi_call_wrapper(grub->Read, 3, grub,
-					       &buffersize, *data);
-	}
-
-	if (efi_status != EFI_SUCCESS) {
-		Print(L"Unexpected return from initial read: %x, buffersize %x\n", efi_status, buffersize);
-		goto error;
-	}
-
-	*datasize = buffersize;
-
-	return EFI_SUCCESS;
 error:
-	if (*data) {
-		FreePool(*data);
-		*data = NULL;
-	}
-	if (PathName)
-		FreePool(PathName);
-	if (fileinfo)
-		FreePool(fileinfo);
 	return efi_status;
 }
 
