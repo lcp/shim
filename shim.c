@@ -684,7 +684,8 @@ static EFI_STATUS handle_grub (void *data, int datasize, EFI_LOADED_IMAGE *li)
 	return EFI_SUCCESS;
 }
 
-static EFI_STATUS generate_path(EFI_LOADED_IMAGE *li, EFI_DEVICE_PATH **grubpath, CHAR16 **PathName)
+static EFI_STATUS generate_path(EFI_LOADED_IMAGE *li, CHAR16 *name,
+				EFI_DEVICE_PATH **grubpath, CHAR16 **PathName)
 {
 	EFI_DEVICE_PATH *devpath;
 	EFI_HANDLE device;
@@ -710,7 +711,7 @@ static EFI_STATUS generate_path(EFI_LOADED_IMAGE *li, EFI_DEVICE_PATH **grubpath
 	if (bootpath[i-i] == '\\')
 		bootpath[i] = '\0';
 
-	*PathName = AllocatePool(StrSize(bootpath) + StrSize(SECOND_STAGE));
+	*PathName = AllocatePool(StrSize(bootpath) + StrSize(name));
 
 	if (!*PathName) {
 		Print(L"Failed to allocate path buffer\n");
@@ -872,7 +873,7 @@ EFI_STATUS init_grub(EFI_HANDLE image_handle)
 		return efi_status;
 	}
 
-	efi_status = generate_path(li, &grubpath, &PathName);
+	efi_status = generate_path(li, SECOND_STAGE, &grubpath, &PathName);
 
 	if (efi_status != EFI_SUCCESS) {
 		Print(L"Unable to generate grub path\n");
