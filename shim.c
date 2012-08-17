@@ -353,6 +353,44 @@ static BOOLEAN secure_mode (void)
 	return TRUE;
 }
 
+static EFI_STATUS open_file (EFI_LOADED_IMAGE *li, CHAR16 *PathName,
+			     EFI_FILE **file, UINT64 mode)
+{
+	EFI_GUID simple_file_system_protocol = SIMPLE_FILE_SYSTEM_PROTOCOL;
+	EFI_STATUS efi_status;
+	EFI_HANDLE device;
+	EFI_FILE_IO_INTERFACE *drive;
+	EFI_FILE *root;
+
+	device = li->DeviceHandle;
+
+	efi_status = uefi_call_wrapper(BS->HandleProtocol, 3, device,
+				       &simple_file_system_protocol, &drive);
+
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"Failed to find fs\n");
+		goto done;
+	}
+
+	efi_status = uefi_call_wrapper(drive->OpenVolume, 2, drive, &root);
+
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"Failed to open fs\n");
+		goto done;
+	}
+
+	efi_status = uefi_call_wrapper(root->Open, 5, root, file, PathName,
+				       EFI_FILE_MODE_READ, 0);
+
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"Failed to open %s - %lx\n", PathName, efi_status);
+		goto done;
+	}
+
+done:
+	return efi_status;
+}
+
 /*
  * Check that the signature is valid and matches the binary
  */
@@ -735,37 +773,16 @@ error:
 static EFI_STATUS load_grub (EFI_LOADED_IMAGE *li, void **data,
 			     int *datasize, CHAR16 *PathName)
 {
-	EFI_GUID simple_file_system_protocol = SIMPLE_FILE_SYSTEM_PROTOCOL;
 	EFI_GUID file_info_id = EFI_FILE_INFO_ID;
 	EFI_STATUS efi_status;
-	EFI_HANDLE device;
 	EFI_FILE_INFO *fileinfo = NULL;
-	EFI_FILE_IO_INTERFACE *drive;
-	EFI_FILE *root, *grub;
+	EFI_FILE *grub;
 	UINTN buffersize = sizeof(EFI_FILE_INFO);
 
-	device = li->DeviceHandle;
-
-	efi_status = uefi_call_wrapper(BS->HandleProtocol, 3, device,
-				       &simple_file_system_protocol, &drive);	
+	efi_status = open_file(li, PathName, &grub, EFI_FILE_MODE_READ);
 
 	if (efi_status != EFI_SUCCESS) {
-		Print(L"Failed to find fs\n");
-		goto error;
-	}
-
-	efi_status = uefi_call_wrapper(drive->OpenVolume, 2, drive, &root);
-
-	if (efi_status != EFI_SUCCESS) {
-		Print(L"Failed to open fs\n");
-		goto error;
-	}
-
-	efi_status = uefi_call_wrapper(root->Open, 5, root, &grub, PathName,
-				       EFI_FILE_MODE_READ, 0);
-
-	if (efi_status != EFI_SUCCESS) {
-		Print(L"Failed to open %s - %lx\n", PathName, efi_status);
+		Print(L"Unable to open file\n");
 		goto error;
 	}
 
