@@ -461,7 +461,6 @@ error:
 	if (fileinfo)
 		FreePool(fileinfo);
 	return efi_status;
-
 }
 
 /*
