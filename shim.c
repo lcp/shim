@@ -835,7 +835,7 @@ static EFI_STATUS generate_path(EFI_LOADED_IMAGE *li, CHAR16 *name,
 
 	*PathName[0] = '\0';
 	StrCat(*PathName, bootpath);
-	StrCat(*PathName, SECOND_STAGE);
+	StrCat(*PathName, name);
 
 	*grubpath = FileDevicePath(device, *PathName);
 
