@@ -87,6 +87,43 @@ static EFI_STATUS get_variable (CHAR16 *name, EFI_GUID guid,
 	return efi_status;
 }
 
+static EFI_STATUS get_sha256sum (void *Data, int DataSize, UINT8 *hash)
+{
+	EFI_STATUS status;
+	unsigned int ctxsize;
+	void *ctx = NULL;
+
+	ctxsize = Sha256GetContextSize();
+	ctx = AllocatePool(ctxsize);
+
+	if (!ctx) {
+		Print(L"Unable to allocate memory for hash context\n");
+		return EFI_OUT_OF_RESOURCES;
+	}
+
+	if (!Sha256Init(ctx)) {
+		Print(L"Unable to initialise hash\n");
+		status = EFI_OUT_OF_RESOURCES;
+		goto done;
+	}
+
+	if (!(Sha256Update(ctx, Data, DataSize))) {
+		Print(L"Unable to generate hash\n");
+		status = EFI_OUT_OF_RESOURCES;
+		goto done;
+	}
+
+	if (!(Sha256Final(ctx, hash))) {
+		Print(L"Unable to finalise hash\n");
+		status = EFI_OUT_OF_RESOURCES;
+		goto done;
+	}
+
+	status = EFI_SUCCESS;
+done:
+	return status;
+}
+
 /*
  * Perform basic bounds checking of the intra-image pointers
  */
