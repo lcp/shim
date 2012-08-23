@@ -957,6 +957,82 @@ done:
 	return efi_status;
 }
 
+static UINT8 mok_enrollment_prompt (UINT8 *hash)
+{
+	EFI_INPUT_KEY key;
+	UINTN EventIndex;
+	int i;
+
+	Print(L"Enroll this machine owner key?\n");
+	Print(L"Fingerprint (SHA256):\n");
+	for (i = 0; i<SHA256_DIGEST_SIZE; i++) {
+		Print(L" %02x", hash[i]);
+		if (i % 16 == 15)
+			Print(L"\n");
+	}
+	Print(L"Enroll the key? (y/N): ");
+
+	uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey, &EventIndex);
+	uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &key);
+
+	if (key.UnicodeChar == 'Y' || key.UnicodeChar == 'y') {
+		Print(L"Y\n");
+		return 1;
+	}
+
+	Print(L"N\n");
+	return 0;
+}
+
+static void check_mok_request(EFI_HANDLE image_handle)
+{
+	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
+	EFI_STATUS efi_status;
+	UINT8 hash[SHA256_DIGEST_SIZE];
+	UINTN DataSize = 0;
+	void *Data = NULL;
+	UINT8 confirmed;
+
+	efi_status = get_variable(L"MokNew", shim_lock_guid, &DataSize, &Data);
+
+	if (efi_status != EFI_SUCCESS) {
+		goto error;
+	}
+
+	efi_status = get_sha256sum(Data, DataSize, hash);
+
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"Failed to compute MOK fingerprint\n");
+		goto error;
+	}
+
+	/* TODO check if the key is already stored */
+
+	confirmed = mok_enrollment_prompt(hash);
+
+	if (!confirmed)
+		goto error;
+
+	/* TODO Enroll MOK */
+
+
+	/* Delete MokNew */
+	efi_status = uefi_call_wrapper(RT->SetVariable, 5, L"MokNew", &shim_lock_guid,
+				       EFI_VARIABLE_NON_VOLATILE
+				       | EFI_VARIABLE_BOOTSERVICE_ACCESS
+				       | EFI_VARIABLE_RUNTIME_ACCESS,
+				       0, (CHAR16 *)NULL);
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"Failed to delete MokNew\n");
+		goto error;
+	}
+error:
+	if (Data)
+		FreePool (Data);
+
+	return;
+}
+
 EFI_STATUS efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *passed_systab)
 {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
@@ -973,6 +1049,8 @@ EFI_STATUS efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *passed_systab)
 	uefi_call_wrapper(BS->InstallProtocolInterface, 4, &handle,
 			  &shim_lock_guid, EFI_NATIVE_INTERFACE,
 			  &shim_lock_interface);
+
+	check_mok_request(image_handle);
 
 	efi_status = init_grub(image_handle);
 
