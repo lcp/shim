@@ -1130,6 +1130,9 @@ static void check_mok_request(EFI_HANDLE image_handle)
 	MokListNode *list = NULL;
 	UINT8 confirmed;
 
+	if (!secure_mode())
+		return;
+
 	efi_status = get_variable(L"MokNew", shim_lock_guid, &MokSize, &Mok);
 
 	if (efi_status != EFI_SUCCESS) {
