@@ -59,6 +59,11 @@ typedef enum {
 	VAR_NOT_FOUND
 } CHECK_STATUS;
 
+typedef struct {
+	UINT32 MokSize;
+	UINT8 *Mok;
+} MokListNode;
+
 static EFI_STATUS get_variable (CHAR16 *name, EFI_GUID guid,
 				UINTN *size, void **buffer)
 {
@@ -122,6 +127,37 @@ static EFI_STATUS get_sha256sum (void *Data, int DataSize, UINT8 *hash)
 	status = EFI_SUCCESS;
 done:
 	return status;
+}
+
+static MokListNode *build_mok_list(UINT32 num, void *Data, UINTN DataSize) {
+	MokListNode *list;
+	int i, remain = DataSize;
+	void *ptr;
+
+	list = AllocatePool(sizeof(MokListNode) * num);
+
+	if (!list) {
+		Print(L"Unable to allocate MOK list\n");
+		return NULL;
+	}
+
+	ptr = Data;
+	for (i = 0; i < num; i++) {
+		if (remain < 0) {
+			Print(L"MOK list was corrupted\n");
+			FreePool(list);
+			return NULL;
+		}
+
+		CopyMem(&list[i].MokSize, ptr, sizeof(UINT32));
+		ptr += sizeof(UINT32);
+		list[i].Mok = ptr;
+		ptr += list[i].MokSize;
+
+		remain -= sizeof(UINT32) + list[i].MokSize;
+	}
+
+	return list;
 }
 
 /*
@@ -972,7 +1008,8 @@ static UINT8 mok_enrollment_prompt (UINT8 *hash)
 	}
 	Print(L"Enroll the key? (y/N): ");
 
-	uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey, &EventIndex);
+	uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey,
+			  &EventIndex);
 	uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &key);
 
 	if (key.UnicodeChar == 'Y' || key.UnicodeChar == 'y') {
@@ -984,51 +1021,145 @@ static UINT8 mok_enrollment_prompt (UINT8 *hash)
 	return 0;
 }
 
+static EFI_STATUS enroll_mok (void *Mok, UINT32 MokSize, void *OldData,
+			      UINT32 OldDataSize, UINT32 MokNum)
+{
+	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
+	EFI_STATUS efi_status;
+	void *Data, *ptr;
+	UINT32 DataSize = 0;
+
+	if (OldData)
+		DataSize += OldDataSize;
+	else
+		DataSize += sizeof(UINT32);
+	DataSize += sizeof(UINT32);
+	DataSize += MokSize;
+	MokNum += 1;
+
+	Data = AllocatePool(DataSize);
+
+	if (!Data) {
+		Print(L"Failed to allocate buffer for MOK list\n");
+		return EFI_OUT_OF_RESOURCES;
+	}
+
+	ptr = Data;
+
+	if (OldData) {
+		CopyMem(ptr, OldData, OldDataSize);
+		CopyMem(ptr, &MokNum, sizeof(MokNum));
+		ptr += OldDataSize;
+	} else {
+		CopyMem(ptr, &MokNum, sizeof(MokNum));
+		ptr += sizeof(MokNum);
+	}
+
+	/* Write new MOK */
+	CopyMem(ptr, &MokSize, sizeof(MokSize));
+	ptr += sizeof(MokSize);
+	CopyMem(ptr, Mok, MokSize);
+
+	efi_status = uefi_call_wrapper(RT->SetVariable, 5, L"MokList",
+				       &shim_lock_guid,
+				       EFI_VARIABLE_NON_VOLATILE
+				       | EFI_VARIABLE_BOOTSERVICE_ACCESS,
+				       DataSize, Data);
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"Failed to set variable %d\n", efi_status);
+		goto error;
+	}
+
+error:
+	if (Data)
+		FreePool(Data);
+
+	return efi_status;
+}
+
 static void check_mok_request(EFI_HANDLE image_handle)
 {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS efi_status;
 	UINT8 hash[SHA256_DIGEST_SIZE];
-	UINTN DataSize = 0;
-	void *Data = NULL;
+	UINTN MokSize = 0, MokListDataSize = 0;
+	void *Mok = NULL, *MokListData = NULL;
+	UINT32 MokNum = 0;
+	MokListNode *list = NULL;
 	UINT8 confirmed;
 
-	efi_status = get_variable(L"MokNew", shim_lock_guid, &DataSize, &Data);
+	efi_status = get_variable(L"MokNew", shim_lock_guid, &MokSize, &Mok);
 
 	if (efi_status != EFI_SUCCESS) {
 		goto error;
 	}
 
-	efi_status = get_sha256sum(Data, DataSize, hash);
+	efi_status = get_variable(L"MokList", shim_lock_guid, &MokListDataSize,
+				  &MokListData);
+
+	if (efi_status == EFI_SUCCESS && MokListData) {
+		int i;
+
+		CopyMem(&MokNum, MokListData, sizeof(UINT32));
+		list = build_mok_list(MokNum,
+				      (void *)MokListData + sizeof(UINT32),
+				      MokListDataSize - sizeof(UINT32));
+
+		if (!list) {
+			Print(L"Failed to construct MOK list\n");
+			goto error;
+		}
+
+		/* check if the key is already enrolled */
+		for (i = 0; i < MokNum; i++) {
+			if (list[i].MokSize == MokSize &&
+			    CompareMem(list[i].Mok, Mok, MokSize) == 0) {
+				Print(L"MOK was already enrolled\n");
+				goto error;
+			}
+		}
+	}
+
+	efi_status = get_sha256sum(Mok, MokSize, hash);
 
 	if (efi_status != EFI_SUCCESS) {
 		Print(L"Failed to compute MOK fingerprint\n");
 		goto error;
 	}
 
-	/* TODO check if the key is already stored */
-
 	confirmed = mok_enrollment_prompt(hash);
 
 	if (!confirmed)
 		goto error;
 
-	/* TODO Enroll MOK */
+	efi_status = enroll_mok(Mok, MokSize, MokListData,
+				MokListDataSize, MokNum);
 
-
-	/* Delete MokNew */
-	efi_status = uefi_call_wrapper(RT->SetVariable, 5, L"MokNew", &shim_lock_guid,
-				       EFI_VARIABLE_NON_VOLATILE
-				       | EFI_VARIABLE_BOOTSERVICE_ACCESS
-				       | EFI_VARIABLE_RUNTIME_ACCESS,
-				       0, (CHAR16 *)NULL);
 	if (efi_status != EFI_SUCCESS) {
-		Print(L"Failed to delete MokNew\n");
+		Print(L"Failed to enroll MOK\n");
 		goto error;
 	}
+
 error:
-	if (Data)
-		FreePool (Data);
+	if (Mok) {
+		/* Delete MokNew */
+		efi_status = uefi_call_wrapper(RT->SetVariable, 5, L"MokNew",
+					       &shim_lock_guid,
+					       EFI_VARIABLE_NON_VOLATILE
+					       | EFI_VARIABLE_BOOTSERVICE_ACCESS
+					       | EFI_VARIABLE_RUNTIME_ACCESS,
+					       0, (CHAR16 *)NULL);
+		if (efi_status != EFI_SUCCESS) {
+			Print(L"Failed to delete MokNew\n");
+		}
+		FreePool (Mok);
+	}
+
+	if (list)
+		FreePool (list);
+
+	if (MokListData)
+		FreePool (MokListData);
 
 	return;
 }
@@ -1046,11 +1177,11 @@ EFI_STATUS efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *passed_systab)
 
 	InitializeLib(image_handle, systab);
 
+	check_mok_request(image_handle);
+
 	uefi_call_wrapper(BS->InstallProtocolInterface, 4, &handle,
 			  &shim_lock_guid, EFI_NATIVE_INTERFACE,
 			  &shim_lock_interface);
-
-	check_mok_request(image_handle);
 
 	efi_status = init_grub(image_handle);
 
