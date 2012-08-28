@@ -1047,18 +1047,33 @@ done:
 	return efi_status;
 }
 
-static UINT8 mok_enrollment_prompt (UINT8 *hash)
+static void show_mok_info (void *Mok, UINTN MokSize)
 {
-	EFI_INPUT_KEY key;
-	int i;
+	EFI_STATUS efi_status;
+	UINT8 hash[SHA256_DIGEST_SIZE];
+	unsigned int i;
 
-	Print(L"Enroll this machine owner key?\n");
+	efi_status = get_sha256sum(Mok, MokSize, hash);
+
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"Failed to compute MOK fingerprint\n");
+		return;
+	}
+
 	Print(L"Fingerprint (SHA256):\n");
-	for (i = 0; i<SHA256_DIGEST_SIZE; i++) {
+	for (i = 0; i < SHA256_DIGEST_SIZE; i++) {
 		Print(L" %02x", hash[i]);
 		if (i % 16 == 15)
 			Print(L"\n");
 	}
+}
+
+static UINT8 mok_enrollment_prompt (void *Mok, UINTN MokSize)
+{
+	EFI_INPUT_KEY key;
+
+	Print(L"Enroll this machine owner key?\n");
+	show_mok_info(Mok, MokSize);
 	Print(L"Enroll the key? (y/N): ");
 
 	key = get_keystroke();
@@ -1131,7 +1146,6 @@ static void check_mok_request(EFI_HANDLE image_handle)
 {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS efi_status;
-	UINT8 hash[SHA256_DIGEST_SIZE];
 	UINTN MokSize = 0, MokListDataSize = 0;
 	void *Mok = NULL, *MokListData = NULL;
 	UINT32 MokNum = 0;
@@ -1173,14 +1187,7 @@ static void check_mok_request(EFI_HANDLE image_handle)
 		}
 	}
 
-	efi_status = get_sha256sum(Mok, MokSize, hash);
-
-	if (efi_status != EFI_SUCCESS) {
-		Print(L"Failed to compute MOK fingerprint\n");
-		goto error;
-	}
-
-	confirmed = mok_enrollment_prompt(hash);
+	confirmed = mok_enrollment_prompt(Mok, MokSize);
 
 	if (!confirmed)
 		goto error;
