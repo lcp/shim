@@ -92,6 +92,18 @@ static EFI_STATUS get_variable (CHAR16 *name, EFI_GUID guid,
 	return efi_status;
 }
 
+static EFI_INPUT_KEY get_keystroke (void)
+{
+	EFI_INPUT_KEY key;
+	UINTN EventIndex;
+
+	uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey,
+			  &EventIndex);
+	uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &key);
+
+	return key;
+}
+
 static EFI_STATUS get_sha256sum (void *Data, int DataSize, UINT8 *hash)
 {
 	EFI_STATUS status;
@@ -1038,7 +1050,6 @@ done:
 static UINT8 mok_enrollment_prompt (UINT8 *hash)
 {
 	EFI_INPUT_KEY key;
-	UINTN EventIndex;
 	int i;
 
 	Print(L"Enroll this machine owner key?\n");
@@ -1050,16 +1061,13 @@ static UINT8 mok_enrollment_prompt (UINT8 *hash)
 	}
 	Print(L"Enroll the key? (y/N): ");
 
-	uefi_call_wrapper(BS->WaitForEvent, 3, 1, &ST->ConIn->WaitForKey,
-			  &EventIndex);
-	uefi_call_wrapper(ST->ConIn->ReadKeyStroke, 2, ST->ConIn, &key);
+	key = get_keystroke();
+	Print(L"%c\n", key.UnicodeChar);
 
 	if (key.UnicodeChar == 'Y' || key.UnicodeChar == 'y') {
-		Print(L"Y\n");
 		return 1;
 	}
 
-	Print(L"N\n");
 	return 0;
 }
 
