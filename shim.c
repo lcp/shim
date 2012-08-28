@@ -643,6 +643,9 @@ static EFI_STATUS verify_buffer (char *data, int datasize,
 	}
 
 	CopyMem(&MokNum, MokListData, sizeof(UINT32));
+	if (MokNum == 0)
+		goto done;
+
 	list = build_mok_list(MokNum,
 			      (void *)MokListData + sizeof(UINT32),
 			      MokListDataSize - sizeof(UINT32));
@@ -1053,6 +1056,9 @@ static void show_mok_info (void *Mok, UINTN MokSize)
 	UINT8 hash[SHA256_DIGEST_SIZE];
 	unsigned int i;
 
+	if (!Mok || MokSize == 0)
+		return;
+
 	efi_status = get_sha256sum(Mok, MokSize, hash);
 
 	if (efi_status != EFI_SUCCESS) {
@@ -1066,6 +1072,193 @@ static void show_mok_info (void *Mok, UINTN MokSize)
 		if (i % 16 == 15)
 			Print(L"\n");
 	}
+}
+
+static UINT8 delete_mok(MokListNode *list, UINT32 MokNum, UINT32 delete)
+{
+	if (!list || !MokNum || MokNum <= delete)
+		return 0;
+
+	list[delete].Mok = NULL;
+	list[delete].MokSize = 0;
+
+	return 1;
+}
+
+static UINT8 mok_deletion_prompt(MokListNode *list, UINT32 MokNum)
+{
+	EFI_INPUT_KEY key;
+	CHAR16 line[10];
+	unsigned int word_count = 0;
+	UINTN delete;
+
+	Print(L"delete key: ");
+	do {
+		key = get_keystroke();
+		if (key.UnicodeChar < '0' ||
+		    key.UnicodeChar > '9' ||
+		    word_count >= 10)
+			continue;
+
+		Print(L"%c", key.UnicodeChar);
+		line[word_count] = key.UnicodeChar;
+		word_count++;
+	} while (key.UnicodeChar != CHAR_CARRIAGE_RETURN);
+	Print(L"\n");
+
+	if (word_count == 0)
+		return 0;
+
+	line[word_count] = '\0';
+	delete = Atoi(line)-1;
+
+	if (delete >= MokNum) {
+		Print(L"No such key\n");
+		return 0;
+	}
+
+	if (!list[delete].Mok) {
+		Print(L"Already deleted\n");
+		return 0;
+	}
+
+	Print(L"Delete this key?\n");
+	show_mok_info(list[delete].Mok, list[delete].MokSize);
+	Print(L"(y/N) ");
+	key = get_keystroke();
+	if (key.UnicodeChar != 'y' && key.UnicodeChar != 'Y') {
+		Print(L"N\nAbort\n");
+		return 0;
+	}
+	Print(L"y\nDelete key %d\n", delete+1);
+
+	return delete_mok(list, MokNum, delete);
+}
+
+static void write_mok_list(void *MokListData, UINTN MokListDataSize,
+			   MokListNode *list, UINT32 MokNum)
+{
+	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
+	EFI_STATUS efi_status;
+	UINT32 new_num = 0;
+	unsigned int i;
+	UINTN DataSize = 0;
+	void *Data, *ptr;
+
+	if (!MokListData || !list)
+		return;
+
+	for (i = 0; i < MokNum; i++) {
+		if (list[i].Mok && list[i].MokSize > 0) {
+			DataSize += list[i].MokSize + sizeof(UINT32);
+			if (new_num < i) {
+				list[new_num].Mok = list[i].Mok;
+				list[new_num].MokSize = list[i].MokSize;
+			}
+			new_num++;
+		}
+	}
+
+	if (new_num == 0) {
+		Data = NULL;
+		goto done;
+	}
+
+	DataSize += sizeof(UINT32);
+
+	Data = AllocatePool(DataSize * sizeof(UINT8));
+	ptr = Data;
+
+	CopyMem(Data, &new_num, sizeof(new_num));
+	ptr += sizeof(new_num);
+
+	for (i = 0; i < new_num; i++) {
+		CopyMem(ptr, &list[i].MokSize, sizeof(list[i].MokSize));
+		ptr += sizeof(list[i].MokSize);
+		CopyMem(ptr, list[i].Mok, list[i].MokSize);
+		ptr += list[i].MokSize;
+	}
+
+done:
+	efi_status = uefi_call_wrapper(RT->SetVariable, 5, L"MokList",
+				       &shim_lock_guid,
+				       EFI_VARIABLE_NON_VOLATILE
+				       | EFI_VARIABLE_BOOTSERVICE_ACCESS,
+				       DataSize, Data);
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"Failed to set variable %d\n", efi_status);
+	}
+
+	if (Data)
+		FreePool(Data);
+}
+
+static void mok_mgmt_shell (void)
+{
+	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
+	EFI_STATUS efi_status;
+	unsigned int i, changed = 0;
+	void *MokListData = NULL;
+	UINTN MokListDataSize = 0;
+	UINT32 MokNum;
+	MokListNode *list = NULL;
+	EFI_INPUT_KEY key;
+
+	efi_status = get_variable(L"MokList", shim_lock_guid, &MokListDataSize,
+				  &MokListData);
+
+	if (efi_status != EFI_SUCCESS) {
+		Print(L"Failed to get MokList\n");
+		goto error;
+	}
+
+	CopyMem(&MokNum, MokListData, sizeof(UINT32));
+	if (MokNum == 0) {
+		Print(L"No key enrolled\n");
+		goto error;
+	}
+	list = build_mok_list(MokNum,
+			      (void *)MokListData + sizeof(UINT32),
+			      MokListDataSize - sizeof(UINT32));
+
+	if (!list) {
+		Print(L"Failed to construct MOK list\n");
+		goto error;
+	}
+
+	do {
+		Print(L" \'c\' to continue) ");
+		key = get_keystroke();
+		Print(L"%c\n", key.UnicodeChar);
+
+		switch (key.UnicodeChar) {
+			case 'l':
+			case 'L':
+				for (i = 0; i < MokNum; i++) {
+					if (list[i].Mok) {
+						Print(L"Key %d\n", i+1);
+						show_mok_info(list[i].Mok, list[i].MokSize);
+						Print(L"\n");
+					}
+				}
+				break;
+			case 'd':
+			case 'D':
+				if (mok_deletion_prompt(list, MokNum) && changed == 0)
+					changed = 1;
+				break;
+		}
+	} while (key.UnicodeChar != 'c' && key.UnicodeChar != 'C');
+
+	if (changed) {
+		write_mok_list(MokListData, MokListDataSize, list, MokNum);
+	}
+
+error:
+	if (MokListData)
+		FreePool(MokListData);
+	if (list)
+		FreePool(list);
 }
 
 static UINT8 mok_enrollment_prompt (void *Mok, UINTN MokSize)
@@ -1146,6 +1339,8 @@ static void check_mok_request(EFI_HANDLE image_handle)
 {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS efi_status;
+	UINTN uint8size = sizeof(UINT8);
+	UINT8 MokMgmt;
 	UINTN MokSize = 0, MokListDataSize = 0;
 	void *Mok = NULL, *MokListData = NULL;
 	UINT32 MokNum = 0;
@@ -1154,6 +1349,21 @@ static void check_mok_request(EFI_HANDLE image_handle)
 
 	if (!secure_mode())
 		return;
+
+	efi_status = get_variable(L"MokMgmt", shim_lock_guid, &uint8size, (void *)&MokMgmt);
+
+	if (efi_status == EFI_SUCCESS && MokMgmt == 1) {
+		mok_mgmt_shell();
+		efi_status = uefi_call_wrapper(RT->SetVariable, 5, L"MokMgmt",
+					       &shim_lock_guid,
+					       EFI_VARIABLE_NON_VOLATILE
+					       | EFI_VARIABLE_BOOTSERVICE_ACCESS
+					       | EFI_VARIABLE_RUNTIME_ACCESS,
+					       0, (UINT8 *)NULL);
+		if (efi_status != EFI_SUCCESS) {
+			Print(L"Failed to delete MokMgmt\n");
+		}
+	}
 
 	efi_status = get_variable(L"MokNew", shim_lock_guid, &MokSize, &Mok);
 
