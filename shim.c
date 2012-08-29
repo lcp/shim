@@ -36,6 +36,7 @@
 #include <efi.h>
 #include <efilib.h>
 #include <Library/BaseCryptLib.h>
+#include <openssl/x509.h>
 #include "PeImage.h"
 #include "shim.h"
 #include "signature.h"
@@ -1050,11 +1051,160 @@ done:
 	return efi_status;
 }
 
+static void print_x509_name (X509_NAME *X509Name, char *name)
+{
+	char *str;
+
+	str = X509_NAME_oneline(X509Name, NULL, 0);
+	if (str) {
+		APrint((CHAR8 *)"%a: %a\n", name, str);
+		OPENSSL_free(str);
+	}
+}
+
+static const char *mon[12]= {
+"Jan","Feb","Mar","Apr","May","Jun",
+"Jul","Aug","Sep","Oct","Nov","Dec"
+};
+
+static void print_x509_GENERALIZEDTIME_time (ASN1_TIME *time, char *name) {
+	char *v;
+	int gmt = 0;
+	int i;
+	int y = 0,M = 0,d = 0,h = 0,m = 0,s = 0;
+	char *f = NULL;
+	int f_len = 0;
+
+	i=time->length;
+	v=(char *)time->data;
+
+	if (i < 12)
+		goto error;
+
+	if (v[i-1] == 'Z')
+		gmt=1;
+
+	for (i=0; i<12; i++) {
+		if ((v[i] > '9') || (v[i] < '0'))
+			goto error;
+	}
+
+	y = (v[0]-'0')*1000+(v[1]-'0')*100 + (v[2]-'0')*10+(v[3]-'0');
+	M = (v[4]-'0')*10+(v[5]-'0');
+
+	if ((M > 12) || (M < 1))
+		goto error;
+
+	d = (v[6]-'0')*10+(v[7]-'0');
+	h = (v[8]-'0')*10+(v[9]-'0');
+	m = (v[10]-'0')*10+(v[11]-'0');
+
+	if (time->length >= 14 &&
+	    (v[12] >= '0') && (v[12] <= '9') &&
+	    (v[13] >= '0') && (v[13] <= '9')) {
+		s = (v[12]-'0')*10+(v[13]-'0');
+		/* Check for fractions of seconds. */
+		if (time->length >= 15 && v[14] == '.')	{
+			int l = time->length;
+			f = &v[14];	/* The decimal point. */
+			f_len = 1;
+			while (14 + f_len < l && f[f_len] >= '0' && f[f_len] <= '9')
+				++f_len;
+		}
+	}
+
+	APrint((CHAR8 *)"%a: %a %2d %02d:%02d:%02d%.*a %d%a",
+	       name, mon[M-1],d,h,m,s,f_len,f,y,(gmt)?" GMT":"");
+error:
+	return;
+}
+
+static void print_x509_UTCTIME_time (ASN1_TIME *time, char *name)
+{
+	char *v;
+	int gmt=0;
+	int i;
+	int y = 0,M = 0,d = 0,h = 0,m = 0,s = 0;
+
+	i=time->length;
+	v=(char *)time->data;
+
+	if (i < 10)
+		goto error;
+
+	if (v[i-1] == 'Z')
+		gmt=1;
+
+	for (i=0; i<10; i++)
+		if ((v[i] > '9') || (v[i] < '0'))
+			goto error;
+
+	y = (v[0]-'0')*10+(v[1]-'0');
+
+	if (y < 50)
+		y+=100;
+
+	M = (v[2]-'0')*10+(v[3]-'0');
+
+	if ((M > 12) || (M < 1))
+		goto error;
+
+	d = (v[4]-'0')*10+(v[5]-'0');
+	h = (v[6]-'0')*10+(v[7]-'0');
+	m = (v[8]-'0')*10+(v[9]-'0');
+
+	if (time->length >=12 &&
+	    (v[10] >= '0') && (v[10] <= '9') &&
+	    (v[11] >= '0') && (v[11] <= '9'))
+		s = (v[10]-'0')*10+(v[11]-'0');
+
+	APrint((CHAR8 *)"%a: %a %2d %02d:%02d:%02d %d%a\n",
+	       name, mon[M-1],d,h,m,s,y+1900,(gmt)?" GMT":"");
+error:
+	return;
+}
+
+static void print_x509_time (ASN1_TIME *time, char *name)
+{
+	if(time->type == V_ASN1_UTCTIME)
+		print_x509_UTCTIME_time(time, name);
+
+	if(time->type == V_ASN1_GENERALIZEDTIME)
+		print_x509_GENERALIZEDTIME_time(time, name);
+}
+
+static void show_x509_info (X509 *X509Cert)
+{
+	X509_NAME *X509Name;
+	ASN1_TIME *time;
+
+	X509Name = X509_get_issuer_name(X509Cert);
+	if (X509Name) {
+		print_x509_name(X509Name, "Issuer");
+	}
+
+	X509Name = X509_get_subject_name(X509Cert);
+	if (X509Name) {
+		print_x509_name(X509Name, "Subject");
+	}
+
+	time = X509_get_notBefore(X509Cert);
+	if (time) {
+		print_x509_time(time, "Not Before");
+	}
+
+	time = X509_get_notAfter(X509Cert);
+	if (time) {
+		print_x509_time(time, "Not After");
+	}
+}
+
 static void show_mok_info (void *Mok, UINTN MokSize)
 {
 	EFI_STATUS efi_status;
 	UINT8 hash[SHA256_DIGEST_SIZE];
 	unsigned int i;
+	X509 *X509Cert;
 
 	if (!Mok || MokSize == 0)
 		return;
@@ -1064,6 +1214,12 @@ static void show_mok_info (void *Mok, UINTN MokSize)
 	if (efi_status != EFI_SUCCESS) {
 		Print(L"Failed to compute MOK fingerprint\n");
 		return;
+	}
+
+	if (X509ConstructCertificate(Mok, MokSize, (UINT8 **) &X509Cert) &&
+	    X509Cert != NULL) {
+		show_x509_info(X509Cert);
+		X509_free(X509Cert);
 	}
 
 	Print(L"Fingerprint (SHA256):\n");
@@ -1265,9 +1421,9 @@ static UINT8 mok_enrollment_prompt (void *Mok, UINTN MokSize)
 {
 	EFI_INPUT_KEY key;
 
-	Print(L"Enroll this machine owner key?\n");
+	Print(L"New machine owner key:\n\n");
 	show_mok_info(Mok, MokSize);
-	Print(L"Enroll the key? (y/N): ");
+	Print(L"\nEnroll the key? (y/N): ");
 
 	key = get_keystroke();
 	Print(L"%c\n", key.UnicodeChar);
@@ -1275,6 +1431,8 @@ static UINT8 mok_enrollment_prompt (void *Mok, UINTN MokSize)
 	if (key.UnicodeChar == 'Y' || key.UnicodeChar == 'y') {
 		return 1;
 	}
+
+	Print(L"Abort\n");
 
 	return 0;
 }
