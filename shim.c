@@ -1251,12 +1251,23 @@ static UINT8 mok_deletion_prompt(MokListNode *list, UINT32 MokNum)
 	Print(L"delete key: ");
 	do {
 		key = get_keystroke();
-		if (key.UnicodeChar < '0' ||
-		    key.UnicodeChar > '9' ||
-		    word_count >= 10)
+		if ((key.UnicodeChar < '0' ||
+		     key.UnicodeChar > '9' ||
+		     word_count >= 10) &&
+		    key.UnicodeChar != CHAR_BACKSPACE)
+			continue;
+
+		if (word_count == 0 && key.UnicodeChar == CHAR_BACKSPACE)
 			continue;
 
 		Print(L"%c", key.UnicodeChar);
+
+		if (key.UnicodeChar == CHAR_BACKSPACE) {
+			word_count--;
+			line[word_count] = '\0';
+			continue;
+		}
+
 		line[word_count] = key.UnicodeChar;
 		word_count++;
 	} while (key.UnicodeChar != CHAR_CARRIAGE_RETURN);
