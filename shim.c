@@ -660,6 +660,15 @@ static EFI_STATUS verify_buffer (char *data, int datasize,
 		goto done;
 	}
 
+	if (attributes & EFI_VARIABLE_RUNTIME_ACCESS) {
+		Print(L"MokList is compromised!\nErase all keys in MokList!\n");
+		if (delete_variable(L"MokList", shim_lock_guid) != EFI_SUCCESS) {
+			Print(L"Failed to erase MokList\n");
+		}
+		status = EFI_ACCESS_DENIED;
+		goto done;
+	}
+
 	CopyMem(&MokNum, MokListData, sizeof(UINT32));
 	if (MokNum == 0)
 		goto done;
@@ -1397,6 +1406,14 @@ static void mok_mgmt_shell (void)
 		goto error;
 	}
 
+	if (attributes & EFI_VARIABLE_RUNTIME_ACCESS) {
+		Print(L"MokList is compromised!\nErase all keys in MokList!\n");
+		if (delete_variable(L"MokList", shim_lock_guid) != EFI_SUCCESS) {
+			Print(L"Failed to erase MokList\n");
+		}
+		goto error;
+	}
+
 	CopyMem(&MokNum, MokListData, sizeof(UINT32));
 	if (MokNum == 0) {
 		Print(L"No key enrolled\n");
@@ -1560,6 +1577,14 @@ static void check_mok_request(EFI_HANDLE image_handle)
 
 	if (efi_status == EFI_SUCCESS && MokListData) {
 		int i;
+
+		if (attributes & EFI_VARIABLE_RUNTIME_ACCESS) {
+			Print(L"MokList is compromised!\nErase all keys in MokList!\n");
+			if (delete_variable(L"MokList", shim_lock_guid) != EFI_SUCCESS) {
+				Print(L"Failed to erase MokList\n");
+			}
+			goto error;
+		}
 
 		CopyMem(&MokNum, MokListData, sizeof(UINT32));
 		list = build_mok_list(MokNum,
