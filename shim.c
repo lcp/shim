@@ -65,15 +65,14 @@ typedef struct {
 	UINT8 *Mok;
 } MokListNode;
 
-static EFI_STATUS get_variable (CHAR16 *name, EFI_GUID guid,
+static EFI_STATUS get_variable (CHAR16 *name, EFI_GUID guid, UINT32 *attributes,
 				UINTN *size, void **buffer)
 {
 	EFI_STATUS efi_status;
-	UINT32 attributes;
 	char allocate = !(*size);
 
 	efi_status = uefi_call_wrapper(RT->GetVariable, 5, name, &guid,
-				       &attributes, size, buffer);
+				       attributes, size, buffer);
 
 	if (efi_status != EFI_BUFFER_TOO_SMALL || !allocate) {
 		return efi_status;
@@ -88,7 +87,7 @@ static EFI_STATUS get_variable (CHAR16 *name, EFI_GUID guid,
 	}
 
 	efi_status = uefi_call_wrapper(RT->GetVariable, 5, name, &guid,
-				       &attributes, size, *buffer);
+				       attributes, size, *buffer);
 
 	return efi_status;
 }
@@ -304,13 +303,15 @@ static CHECK_STATUS check_db_cert(CHAR16 *dbname, WIN_CERTIFICATE_EFI_PKCS *data
 	EFI_GUID secure_var = EFI_IMAGE_SECURITY_DATABASE_GUID;
 	EFI_SIGNATURE_LIST *CertList;
 	EFI_SIGNATURE_DATA *Cert;
+	UINT32 attributes;
 	UINTN dbsize = 0;
 	UINTN CertCount, Index;
 	BOOLEAN IsFound = FALSE;
 	void *db;
 	EFI_GUID CertType = EfiCertX509Guid;
 
-	efi_status = get_variable(dbname, secure_var, &dbsize, &db);
+	efi_status = get_variable(dbname, secure_var, &attributes,
+				  &dbsize, &db);
 
 	if (efi_status != EFI_SUCCESS)
 		return VAR_NOT_FOUND;
@@ -353,6 +354,7 @@ static CHECK_STATUS check_db_hash(CHAR16 *dbname, UINT8 *data)
 	EFI_GUID secure_var = EFI_IMAGE_SECURITY_DATABASE_GUID;
 	EFI_SIGNATURE_LIST *CertList;
 	EFI_SIGNATURE_DATA *Cert;
+	UINT32 attributes;
 	UINTN dbsize = 0;
 	UINTN CertCount, Index;
 	BOOLEAN IsFound = FALSE;
@@ -360,7 +362,8 @@ static CHECK_STATUS check_db_hash(CHAR16 *dbname, UINT8 *data)
 	unsigned int SignatureSize = SHA256_DIGEST_SIZE;
 	EFI_GUID CertType = EfiHashSha256Guid;
 
-	efi_status = get_variable(dbname, secure_var, &dbsize, &db);
+	efi_status = get_variable(dbname, secure_var, &attributes,
+				  &dbsize, &db);
 
 	if (efi_status != EFI_SUCCESS) {
 		return VAR_NOT_FOUND;
@@ -430,8 +433,10 @@ static BOOLEAN secure_mode (void)
 	EFI_GUID global_var = EFI_GLOBAL_VARIABLE;
 	UINTN charsize = sizeof(char);
 	UINT8 sb, setupmode;
+	UINT32 attributes;
 
-	status = get_variable(L"SecureBoot", global_var, &charsize, (void *)&sb);
+	status = get_variable(L"SecureBoot", global_var, &attributes,
+			      &charsize, (void *)&sb);
 
 	/* FIXME - more paranoia here? */
 	if (status != EFI_SUCCESS || sb != 1) {
@@ -439,7 +444,8 @@ static BOOLEAN secure_mode (void)
 		return FALSE;
 	}
 
-	status = get_variable(L"SetupMode", global_var, &charsize, (void *)&setupmode);
+	status = get_variable(L"SetupMode", global_var, &attributes,
+			      &charsize, (void *)&setupmode);
 
 	if (status == EFI_SUCCESS && setupmode == 1) {
 		Print(L"Platform is in setup mode\n");
@@ -473,6 +479,7 @@ static EFI_STATUS verify_buffer (char *data, int datasize,
 	void *MokListData = NULL;
 	UINTN MokListDataSize = 0;
 	UINT32 MokNum;
+	UINT32 attributes;
 	MokListNode *list = NULL;
 
 	cert = ImageAddress (data, size, context->SecDir->VirtualAddress);
@@ -644,8 +651,8 @@ static EFI_STATUS verify_buffer (char *data, int datasize,
 		goto done;
 	}
 
-	status = get_variable(L"MokList", shim_lock_guid, &MokListDataSize,
-			      &MokListData);
+	status = get_variable(L"MokList", shim_lock_guid, &attributes,
+			      &MokListDataSize, &MokListData);
 
 	if (status != EFI_SUCCESS) {
 		status = EFI_ACCESS_DENIED;
@@ -1378,11 +1385,12 @@ static void mok_mgmt_shell (void)
 	void *MokListData = NULL;
 	UINTN MokListDataSize = 0;
 	UINT32 MokNum;
+	UINT32 attributes;
 	MokListNode *list = NULL;
 	EFI_INPUT_KEY key;
 
-	efi_status = get_variable(L"MokList", shim_lock_guid, &MokListDataSize,
-				  &MokListData);
+	efi_status = get_variable(L"MokList", shim_lock_guid, &attributes,
+				  &MokListDataSize, &MokListData);
 
 	if (efi_status != EFI_SUCCESS) {
 		Print(L"Failed to get MokList\n");
@@ -1523,13 +1531,15 @@ static void check_mok_request(EFI_HANDLE image_handle)
 	UINTN MokSize = 0, MokListDataSize = 0;
 	void *Mok = NULL, *MokListData = NULL;
 	UINT32 MokNum = 0;
+	UINT32 attributes;
 	MokListNode *list = NULL;
 	UINT8 confirmed;
 
 	if (!secure_mode())
 		return;
 
-	efi_status = get_variable(L"MokMgmt", shim_lock_guid, &uint8size, (void *)&MokMgmt);
+	efi_status = get_variable(L"MokMgmt", shim_lock_guid, &attributes,
+				  &uint8size, (void *)&MokMgmt);
 
 	if (efi_status == EFI_SUCCESS && MokMgmt == 1) {
 		mok_mgmt_shell();
@@ -1538,14 +1548,15 @@ static void check_mok_request(EFI_HANDLE image_handle)
 		}
 	}
 
-	efi_status = get_variable(L"MokNew", shim_lock_guid, &MokSize, &Mok);
+	efi_status = get_variable(L"MokNew", shim_lock_guid, &attributes,
+				  &MokSize, &Mok);
 
 	if (efi_status != EFI_SUCCESS) {
 		goto error;
 	}
 
-	efi_status = get_variable(L"MokList", shim_lock_guid, &MokListDataSize,
-				  &MokListData);
+	efi_status = get_variable(L"MokList", shim_lock_guid, &attributes,
+				  &MokListDataSize, &MokListData);
 
 	if (efi_status == EFI_SUCCESS && MokListData) {
 		int i;
