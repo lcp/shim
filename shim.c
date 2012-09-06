@@ -93,6 +93,16 @@ static EFI_STATUS get_variable (CHAR16 *name, EFI_GUID guid,
 	return efi_status;
 }
 
+static EFI_STATUS delete_variable (CHAR16 *name, EFI_GUID guid)
+{
+	EFI_STATUS efi_status;
+
+	efi_status = uefi_call_wrapper(RT->SetVariable, 5, name, &guid,
+				       0, 0, (UINT8 *)NULL);
+
+	return efi_status;
+}
+
 static EFI_INPUT_KEY get_keystroke (void)
 {
 	EFI_INPUT_KEY key;
@@ -1523,13 +1533,7 @@ static void check_mok_request(EFI_HANDLE image_handle)
 
 	if (efi_status == EFI_SUCCESS && MokMgmt == 1) {
 		mok_mgmt_shell();
-		efi_status = uefi_call_wrapper(RT->SetVariable, 5, L"MokMgmt",
-					       &shim_lock_guid,
-					       EFI_VARIABLE_NON_VOLATILE
-					       | EFI_VARIABLE_BOOTSERVICE_ACCESS
-					       | EFI_VARIABLE_RUNTIME_ACCESS,
-					       0, (UINT8 *)NULL);
-		if (efi_status != EFI_SUCCESS) {
+		if (delete_variable(L"MokMgmt", shim_lock_guid) != EFI_SUCCESS) {
 			Print(L"Failed to delete MokMgmt\n");
 		}
 	}
@@ -1581,14 +1585,7 @@ static void check_mok_request(EFI_HANDLE image_handle)
 
 error:
 	if (Mok) {
-		/* Delete MokNew */
-		efi_status = uefi_call_wrapper(RT->SetVariable, 5, L"MokNew",
-					       &shim_lock_guid,
-					       EFI_VARIABLE_NON_VOLATILE
-					       | EFI_VARIABLE_BOOTSERVICE_ACCESS
-					       | EFI_VARIABLE_RUNTIME_ACCESS,
-					       0, (CHAR16 *)NULL);
-		if (efi_status != EFI_SUCCESS) {
+		if (delete_variable(L"MokNew", shim_lock_guid) != EFI_SUCCESS) {
 			Print(L"Failed to delete MokNew\n");
 		}
 		FreePool (Mok);
