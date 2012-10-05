@@ -534,7 +534,6 @@ static EFI_STATUS store_keys (void *MokNew, UINTN MokNewSize)
 				       &shim_lock_guid,
 				       &attributes, &auth_size, auth);
 
-
 	if (efi_status != EFI_SUCCESS || auth_size != SHA256_DIGEST_SIZE) {
 		Print(L"Failed to get MokAuth %d\n", efi_status);
 		return efi_status;
@@ -565,6 +564,8 @@ static EFI_STATUS store_keys (void *MokNew, UINTN MokNewSize)
 		}
 	}
 
+	LibDeleteVariable(L"MokAuth", &shim_lock_guid);
+
 	if (fail_count >= 3)
 		return EFI_ACCESS_DENIED;
 
@@ -576,10 +577,9 @@ static EFI_STATUS store_keys (void *MokNew, UINTN MokNewSize)
 				       MokNewSize, MokNew);
 	if (efi_status != EFI_SUCCESS) {
 		Print(L"Failed to set variable %d\n", efi_status);
-		return efi_status;
 	}
 
-	return EFI_SUCCESS;
+	return efi_status;
 }
 
 static EFI_STATUS check_mok_request(EFI_HANDLE image_handle)
@@ -594,6 +594,7 @@ static EFI_STATUS check_mok_request(EFI_HANDLE image_handle)
 	MokNew = LibGetVariableAndSize(L"MokNew", &shim_lock_guid, &MokNewSize);
 
 	if (MokNew == NULL || MokNewSize < sizeof(UINT32)) {
+		efi_status = EFI_NOT_FOUND;
 		goto error;
 	}
 
@@ -604,7 +605,7 @@ static EFI_STATUS check_mok_request(EFI_HANDLE image_handle)
 		if (!confirmed)
 			goto error;
 
-		efi_status = store_keys(MokNew, sizeof(UINT32));
+		efi_status = store_keys(&MokNum, sizeof(UINT32));
 
 		if (efi_status != EFI_SUCCESS) {
 			Print(L"Failed to erase keys\n");
@@ -625,14 +626,15 @@ static EFI_STATUS check_mok_request(EFI_HANDLE image_handle)
 	}
 error:
 	if (MokNew) {
-		if (LibDeleteVariable(L"MokNew", &shim_lock_guid) != EFI_SUCCESS) {
+		efi_status = LibDeleteVariable(L"MokNew", &shim_lock_guid);
+
+		if (efi_status != EFI_SUCCESS) {
 			Print(L"Failed to delete MokNew\n");
 		}
 		FreePool (MokNew);
 	}
-	LibDeleteVariable(L"MokAuth", &shim_lock_guid);
 
-	return EFI_SUCCESS;
+	return efi_status;
 }
 
 EFI_STATUS efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *systab)
