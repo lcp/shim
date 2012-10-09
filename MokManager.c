@@ -544,7 +544,7 @@ static EFI_STATUS store_keys (void *MokNew, UINTN MokNewSize)
 		      PASSWORD_MIN, PASSWORD_MAX);
 		get_line(&pw_length, password, PASSWORD_MAX, 0);
 
-		if (pw_length < 8) {
+		if (pw_length < PASSWORD_MIN) {
 			Print(L"At least %d characters for the password\n",
 			      PASSWORD_MIN);
 		}
