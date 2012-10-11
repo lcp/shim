@@ -579,7 +579,9 @@ static UINTN mok_enrollment_prompt (void *MokNew, UINTN MokNewSize, int auth) {
 }
 
 static INTN mok_enrollment_prompt_callback (void *MokNew, void *data2) {
-	return mok_enrollment_prompt(MokNew, (UINTN)data2, TRUE);
+	UINTN MokNewSize;
+	CopyMem(&MokNewSize, data2, sizeof(UINTN));
+	return mok_enrollment_prompt(MokNew, MokNewSize, TRUE);
 }
 
 static INTN mok_deletion_prompt (void *MokNew, void *data2) {
@@ -1024,7 +1026,7 @@ static INTN find_fs (void *data, void *data2) {
 	return 0;
 }
 
-static EFI_STATUS enter_mok_menu(EFI_HANDLE image_handle, void *MokNew)
+static EFI_STATUS enter_mok_menu(EFI_HANDLE image_handle, void *MokNew, UINTN MokNewSize)
 {
 	struct menu_item *menu_item;
 	UINT32 MokNum;
@@ -1052,9 +1054,10 @@ static EFI_STATUS enter_mok_menu(EFI_HANDLE image_handle, void *MokNew)
 			menu_item[1].data = MokNew;
 			menu_item[1].callback = mok_deletion_prompt;
 		} else {
-			menu_item[1].text = StrDuplicate(L"Enroll MOK\n");
+			menu_item[1].text = StrDuplicate(L"Enroll MOK");
 			menu_item[1].colour = EFI_WHITE;
 			menu_item[1].data = MokNew;
+			menu_item[1].data2 = &MokNewSize;
 			menu_item[1].callback = mok_enrollment_prompt_callback;
 		}
 		menucount++;
@@ -1068,6 +1071,8 @@ static EFI_STATUS enter_mok_menu(EFI_HANDLE image_handle, void *MokNew)
 
 	run_menu(menu_item, menucount);
 
+	uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
+
 	return 0;
 }
 
@@ -1079,7 +1084,7 @@ static EFI_STATUS check_mok_request(EFI_HANDLE image_handle)
 
 	MokNew = LibGetVariableAndSize(L"MokNew", &shim_lock_guid, &MokNewSize);
 
-	enter_mok_menu(image_handle, MokNew);
+	enter_mok_menu(image_handle, MokNew, MokNewSize);
 
 	if (MokNew) {
 		if (LibDeleteVariable(L"MokNew", &shim_lock_guid) != EFI_SUCCESS) {
