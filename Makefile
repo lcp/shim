@@ -16,6 +16,15 @@ EFI_LIBS	= -lefi -lgnuefi --start-group Cryptlib/libcryptlib.a Cryptlib/OpenSSL/
 EFI_CRT_OBJS 	= $(EFI_PATH)/crt0-efi-$(ARCH).o
 EFI_LDS		= $(EFI_PATH)/elf_$(ARCH)_efi.lds
 
+DEFAULT_LOADER	:= \\\\grub.efi
+CFLAGS		= -ggdb -O0 -fno-stack-protector -fno-strict-aliasing -fpic \
+		  -fshort-wchar -Wall -Wsign-compare -Werror \
+		  -mno-red-zone -maccumulate-outgoing-args \
+		  -mno-mmx -mno-sse -fno-builtin \
+		  "-DDEFAULT_LOADER=L\"$(DEFAULT_LOADER)\"" \
+		  "-DDEFAULT_LOADER_CHAR=\"$(DEFAULT_LOADER)\"" \
+		  $(EFI_INCLUDES)
+
 CFLAGS		= -ggdb -O0 -fno-stack-protector -fno-strict-aliasing -fpic -fshort-wchar \
 		  -Wall -mno-red-zone \
 		  $(EFI_INCLUDES)

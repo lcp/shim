@@ -516,7 +516,7 @@ static UINT8 list_keys (void *KeyList, UINTN KeyListSize, CHAR16 *title)
 static UINT8 get_line (UINT32 *length, CHAR16 *line, UINT32 line_max, UINT8 show)
 {
 	EFI_INPUT_KEY key;
-	int count = 0;
+	unsigned int count = 0;
 
 	do {
 		key = get_keystroke();
@@ -610,7 +610,7 @@ static EFI_STATUS match_password (PASSWORD_CRYPT *pw_crypt,
 	CHAR16 password[PASSWORD_MAX];
 	UINT32 pw_length;
 	UINT8 fail_count = 0;
-	int i;
+	unsigned int i;
 
 	if (pw_crypt) {
 		auth_hash = pw_crypt->hash;
