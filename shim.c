@@ -388,7 +388,6 @@ static EFI_STATUS check_blacklist (WIN_CERTIFICATE_EFI_PKCS *cert,
 static EFI_STATUS check_whitelist (WIN_CERTIFICATE_EFI_PKCS *cert,
 				   UINT8 *sha256hash, UINT8 *sha1hash)
 {
-	EFI_GUID global_var = EFI_GLOBAL_VARIABLE;
 	EFI_GUID secure_var = EFI_IMAGE_SECURITY_DATABASE_GUID;
 	EFI_GUID shim_var = SHIM_LOCK_GUID;
 
@@ -400,10 +399,6 @@ static EFI_STATUS check_whitelist (WIN_CERTIFICATE_EFI_PKCS *cert,
 		return EFI_SUCCESS;
 	if (check_db_hash(L"MokList", shim_var, sha256hash, SHA256_DIGEST_SIZE,
 			  EfiHashSha256Guid) == DATA_FOUND)
-		return EFI_SUCCESS;
-	if (check_db_cert(L"PK", global_var, cert, sha256hash) == DATA_FOUND)
-		return EFI_SUCCESS;
-	if (check_db_cert(L"KEK", global_var, cert, sha256hash) == DATA_FOUND)
 		return EFI_SUCCESS;
 	if (check_db_cert(L"db", secure_var, cert, sha256hash) == DATA_FOUND)
 		return EFI_SUCCESS;
