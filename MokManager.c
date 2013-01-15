@@ -19,6 +19,9 @@
 #define CERT_STRING L"Select an X509 certificate to enroll:\n\n"
 #define HASH_STRING L"Select a file to trust:\n\n"
 
+#define SALT_LEN 16
+#define AUTH_LEN (SALT_LEN + SHA256_DIGEST_SIZE)
+
 struct menu_item {
 	CHAR16 *text;
 	INTN (* callback)(void *data, void *data2, void *data3);
@@ -648,23 +651,30 @@ static EFI_STATUS store_keys (void *MokNew, UINTN MokNewSize, int authenticate)
 {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS efi_status;
-	UINT8 auth[SHA256_DIGEST_SIZE];
-	UINTN auth_size;
+	UINT8 data[AUTH_LEN], *auth, *salt;
+	UINTN auth_size = AUTH_LEN;
 	UINT32 attributes;
 
 	if (authenticate) {
-		auth_size = SHA256_DIGEST_SIZE;
 		efi_status = uefi_call_wrapper(RT->GetVariable, 5, L"MokAuth",
 					       &shim_lock_guid,
-					       &attributes, &auth_size, auth);
+					       &attributes, &auth_size, data);
 
 
-		if (efi_status != EFI_SUCCESS || auth_size != SHA256_DIGEST_SIZE) {
+		if (efi_status != EFI_SUCCESS ||
+		    (auth_size != SHA256_DIGEST_SIZE && auth_size != AUTH_LEN)) {
 			Print(L"Failed to get MokAuth %d\n", efi_status);
 			return efi_status;
 		}
 
-		efi_status = match_password(MokNew, MokNewSize, auth, NULL);
+		if (auth_size == AUTH_LEN) {
+			salt = data;
+			auth = data + SALT_LEN;
+			efi_status = match_password(salt, SALT_LEN, auth, NULL);
+		} else {
+			auth = data;
+			efi_status = match_password(MokNew, MokNewSize, auth, NULL);
+		}
 		if (efi_status != EFI_SUCCESS)
 			return EFI_ACCESS_DENIED;
 	}
@@ -842,8 +852,8 @@ static EFI_STATUS delete_keys (void *MokDel, UINTN MokDelSize)
 {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS efi_status;
-	UINT8 auth[SHA256_DIGEST_SIZE];
-	UINTN auth_size = SHA256_DIGEST_SIZE;
+	UINT8 data[AUTH_LEN], *auth, *salt;;
+	UINTN auth_size = AUTH_LEN;
 	UINT32 attributes;
 	void *MokListData = NULL;
 	UINTN MokListDataSize = 0;
@@ -853,14 +863,22 @@ static EFI_STATUS delete_keys (void *MokDel, UINTN MokDelSize)
 
 	efi_status = uefi_call_wrapper(RT->GetVariable, 5, L"MokDelAuth",
 				       &shim_lock_guid,
-				       &attributes, &auth_size, auth);
+				       &attributes, &auth_size, data);
 
-	if (efi_status != EFI_SUCCESS || auth_size != SHA256_DIGEST_SIZE) {
+	if (efi_status != EFI_SUCCESS ||
+	    (auth_size != SHA256_DIGEST_SIZE && auth_size != AUTH_LEN)) {
 		Print(L"Failed to get MokDelAuth %d\n", efi_status);
 		return efi_status;
 	}
 
-	efi_status = match_password(MokDel, MokDelSize, auth, NULL);
+	if (auth_size == AUTH_LEN) {
+		salt = data;
+		auth = data + SALT_LEN;
+		efi_status = match_password(salt, SALT_LEN, auth, NULL);
+	} else {
+		auth = data;
+		efi_status = match_password(MokDel, MokDelSize, auth, NULL);
+	}
 	if (efi_status != EFI_SUCCESS)
 		return EFI_ACCESS_DENIED;
 
@@ -1052,20 +1070,29 @@ static INTN mok_pw_prompt (void *MokPW, void *data2, void *data3) {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS efi_status;
 	UINTN MokPWSize = (UINTN)data2;
-	UINT8 hash[SHA256_DIGEST_SIZE];
+	UINT8 hash[AUTH_LEN], *auth, *salt;
+	UINT8 clear = 0;
 	UINT32 length;
 	CHAR16 line[1];
 
-	if (MokPWSize != SHA256_DIGEST_SIZE) {
+	if (MokPWSize != SHA256_DIGEST_SIZE && MokPWSize != AUTH_LEN) {
 		Print(L"Invalid MokPW variable contents\n");
 		return -1;
 	}
 
 	uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
 
-	SetMem(hash, SHA256_DIGEST_SIZE, 0);
+	SetMem(hash, AUTH_LEN, 0);
 
-	if (CompareMem(MokPW, hash, SHA256_DIGEST_SIZE) == 0) {
+	if (MokPWSize == AUTH_LEN) {
+		if (CompareMem(MokPW, hash, AUTH_LEN) == 0)
+			clear = 1;
+	} else {
+		if (CompareMem(MokPW, hash, SHA256_DIGEST_SIZE) == 0)
+			clear = 1;
+	}
+
+	if (clear) {
 		Print(L"Clear MOK password? (y/n): ");
 
 		do {
@@ -1080,7 +1107,14 @@ static INTN mok_pw_prompt (void *MokPW, void *data2, void *data3) {
 		return 0;
 	}
 
-	efi_status = match_password(NULL, 0, MokPW, L"Confirm MOK passphrase: ");
+	if (MokPWSize == AUTH_LEN) {
+		salt = MokPW;
+		auth = MokPW + SALT_LEN;
+		efi_status = match_password(salt, SALT_LEN, auth, L"Confirm MOK passphrase: ");
+	} else {
+		efi_status = match_password(NULL, 0, MokPW, L"Confirm MOK passphrase: ");
+	}
+
 	if (efi_status != EFI_SUCCESS) {
 		Print(L"Password limit reached\n");
 		return -1;
@@ -1691,8 +1725,8 @@ static BOOLEAN verify_pw(void)
 {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS efi_status;
-	UINT8 pwhash[SHA256_DIGEST_SIZE];
-	UINTN size = SHA256_DIGEST_SIZE;
+	UINT8 pwhash[AUTH_LEN], *auth, *salt;
+	UINTN size = AUTH_LEN;
 	UINT32 attributes;
 
 	efi_status = uefi_call_wrapper(RT->GetVariable, 5, L"MokPWStore",
@@ -1704,7 +1738,8 @@ static BOOLEAN verify_pw(void)
 	 * known value, so there's no safety advantage in failing to validate
 	 * purely because of a failure to read the variable
 	 */
-	if (efi_status != EFI_SUCCESS)
+	if (efi_status != EFI_SUCCESS ||
+	    (size != SHA256_DIGEST_SIZE && size != AUTH_LEN))
 		return TRUE;
 
 	if (attributes & EFI_VARIABLE_RUNTIME_ACCESS)
@@ -1712,7 +1747,13 @@ static BOOLEAN verify_pw(void)
 
 	uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
 
-	efi_status = match_password(NULL, 0, pwhash, L"Enter MOK password: ");
+	if (size == AUTH_LEN) {
+		salt = pwhash;
+		auth = pwhash + SALT_LEN;
+		efi_status = match_password(salt, SALT_LEN, auth, L"Enter MOK password: ");
+	} else {
+		efi_status = match_password(NULL, 0, pwhash, L"Enter MOK password: ");
+	}
 	if (efi_status != EFI_SUCCESS) {
 		Print(L"Password limit reached\n");
 		return FALSE;
@@ -1733,8 +1774,8 @@ static EFI_STATUS enter_mok_menu(EFI_HANDLE image_handle,
 	UINTN menucount = 3, i = 0;
 	EFI_STATUS efi_status;
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
-	UINT8 auth[SHA256_DIGEST_SIZE];
-	UINTN auth_size = SHA256_DIGEST_SIZE;
+	UINT8 auth[AUTH_LEN];
+	UINTN auth_size = AUTH_LEN;
 	UINT32 attributes;
 
 	if (verify_pw() == FALSE)
@@ -1744,14 +1785,16 @@ static EFI_STATUS enter_mok_menu(EFI_HANDLE image_handle,
 					       &shim_lock_guid,
 					       &attributes, &auth_size, auth);
 
-	if ((efi_status == EFI_SUCCESS) && (auth_size == SHA256_DIGEST_SIZE))
+	if ((efi_status == EFI_SUCCESS) &&
+	    (auth_size == SHA256_DIGEST_SIZE || auth_size == AUTH_LEN))
 		MokAuth = 1;
 
 	efi_status = uefi_call_wrapper(RT->GetVariable, 5, L"MokDelAuth",
 					       &shim_lock_guid,
 					       &attributes, &auth_size, auth);
 
-	if ((efi_status == EFI_SUCCESS) && (auth_size == SHA256_DIGEST_SIZE))
+	if ((efi_status == EFI_SUCCESS) &&
+	   (auth_size == SHA256_DIGEST_SIZE || auth_size == AUTH_LEN))
 		MokDelAuth = 1;
 
 	if (MokNew || MokAuth)
