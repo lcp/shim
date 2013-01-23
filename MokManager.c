@@ -5,11 +5,11 @@
 #include "shim.h"
 #include "signature.h"
 #include "PeImage.h"
-#include "PasswordHash.h"
+#include "PasswordCrypt.h"
 
-#define PASSWORD_MAX 16
-#define PASSWORD_MIN 8
-#define SB_PASSWORD_LEN 8
+#define PASSWORD_MAX 256
+#define PASSWORD_MIN 1
+#define SB_PASSWORD_LEN 16
 
 #ifndef SHIM_VENDOR
 #define SHIM_VENDOR L"Shim"
@@ -38,7 +38,7 @@ typedef struct {
 typedef struct {
 	UINT32 MokSBState;
 	UINT32 PWLen;
-	CHAR16 Password[PASSWORD_MAX];
+	CHAR16 Password[SB_PASSWORD_LEN];
 } __attribute__ ((packed)) MokSBvar;
 
 static EFI_STATUS get_variable (CHAR16 *name, EFI_GUID guid, UINT32 *attributes,
@@ -597,11 +597,11 @@ done:
 	return status;
 }
 
-static EFI_STATUS match_password (PASSWORD_HASH *pw_hash,
+static EFI_STATUS match_password (PASSWORD_CRYPT *pw_crypt,
 				  void *Data, UINTN DataSize,
 				  UINT8 *auth, CHAR16 *prompt)
 {
-	EFI_STATUS efi_status;
+	EFI_STATUS status;
 	UINT8 hash[SHA256_DIGEST_SIZE];
 	UINT8 *auth_hash;
 	UINT32 auth_size;
@@ -610,14 +610,14 @@ static EFI_STATUS match_password (PASSWORD_HASH *pw_hash,
 	UINT8 fail_count = 0;
 	int i;
 
-	if (pw_hash) {
+	if (pw_crypt) {
 		/*
-		 * Only support sha256 now and ignore iter_count
+		 * Only support sha256 now
 		 */
-		if(pw_hash->method != SHA256_BASED)
+		if(pw_crypt->method != SHA256_BASED)
 			return EFI_INVALID_PARAMETER;
-		auth_hash = pw_hash->hash;
-		/* FIXME assign auth_size according to pw_hash->method */
+		auth_hash = pw_crypt->hash;
+		/* FIXME assign auth_size according to pw_crypt->method */
 		auth_size = SHA256_DIGEST_SIZE;
 	} else if (auth) {
 		auth_hash = auth;
@@ -643,22 +643,20 @@ static EFI_STATUS match_password (PASSWORD_HASH *pw_hash,
 		/*
 		 * Compute password hash
 		 */
-		if (pw_hash) {
+		if (pw_crypt) {
 			char pw_ascii[PASSWORD_MAX];
 			for (i = 0; i < pw_length; i++)
 				pw_ascii[i] = (char)password[i];
 
-			/* FIXME calculate a proper salt_size */
-			efi_status = compute_pw_hash(pw_hash->salt, (pw_hash->salt_size)/8,
-						     (UINT8 *)pw_ascii, pw_length, hash);
+			status = password_crypt(pw_ascii, pw_length, pw_crypt, hash);
 		} else {
 			/*
 			 * For backward compatibility
 			 */
-			efi_status = compute_pw_hash(Data, DataSize, (UINT8 *)password,
-						     pw_length * sizeof(CHAR16), hash);
+			status = compute_pw_hash(Data, DataSize, (UINT8 *)password,
+						 pw_length * sizeof(CHAR16), hash);
 		}
-		if (efi_status != EFI_SUCCESS) {
+		if (status != EFI_SUCCESS) {
 			Print(L"Unable to generate password hash\n");
 			fail_count++;
 			continue;
@@ -683,8 +681,8 @@ static EFI_STATUS store_keys (void *MokNew, UINTN MokNewSize, int authenticate)
 {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS efi_status;
-	UINT8 auth[PASSWORD_HASH_SIZE];
-	UINTN auth_size = PASSWORD_HASH_SIZE;
+	UINT8 auth[PASSWORD_CRYPT_SIZE];
+	UINTN auth_size = PASSWORD_CRYPT_SIZE;
 	UINT32 attributes;
 
 	if (authenticate) {
@@ -694,13 +692,13 @@ static EFI_STATUS store_keys (void *MokNew, UINTN MokNewSize, int authenticate)
 
 		if (efi_status != EFI_SUCCESS ||
 		    (auth_size != SHA256_DIGEST_SIZE &&
-		     auth_size != PASSWORD_HASH_SIZE)) {
+		     auth_size != PASSWORD_CRYPT_SIZE)) {
 			Print(L"Failed to get MokAuth %d\n", efi_status);
 			return efi_status;
 		}
 
-		if (auth_size == PASSWORD_HASH_SIZE) {
-			efi_status = match_password((PASSWORD_HASH *)auth,
+		if (auth_size == PASSWORD_CRYPT_SIZE) {
+			efi_status = match_password((PASSWORD_CRYPT *)auth,
 						    NULL, 0, NULL, NULL);
 		} else {
 			efi_status = match_password(NULL, MokNew, MokNewSize,
@@ -883,8 +881,8 @@ static EFI_STATUS delete_keys (void *MokDel, UINTN MokDelSize)
 {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS efi_status;
-	UINT8 auth[PASSWORD_HASH_SIZE];
-	UINTN auth_size = PASSWORD_HASH_SIZE;
+	UINT8 auth[PASSWORD_CRYPT_SIZE];
+	UINTN auth_size = PASSWORD_CRYPT_SIZE;
 	UINT32 attributes;
 	void *MokListData = NULL;
 	UINTN MokListDataSize = 0;
@@ -897,13 +895,13 @@ static EFI_STATUS delete_keys (void *MokDel, UINTN MokDelSize)
 				       &attributes, &auth_size, auth);
 
 	if (efi_status != EFI_SUCCESS ||
-	    (auth_size != SHA256_DIGEST_SIZE && auth_size != PASSWORD_HASH_SIZE)) {
+	    (auth_size != SHA256_DIGEST_SIZE && auth_size != PASSWORD_CRYPT_SIZE)) {
 		Print(L"Failed to get MokDelAuth %d\n", efi_status);
 		return efi_status;
 	}
 
-	if (auth_size == PASSWORD_HASH_SIZE) {
-		efi_status = match_password((PASSWORD_HASH *)auth, NULL, 0,
+	if (auth_size == PASSWORD_CRYPT_SIZE) {
+		efi_status = match_password((PASSWORD_CRYPT *)auth, NULL, 0,
 					    NULL, NULL);
 	} else {
 		efi_status = match_password(NULL, MokDel, MokDelSize, auth, NULL);
@@ -1099,22 +1097,22 @@ static INTN mok_pw_prompt (void *MokPW, void *data2, void *data3) {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS efi_status;
 	UINTN MokPWSize = (UINTN)data2;
-	UINT8 hash[PASSWORD_HASH_SIZE];
+	UINT8 hash[PASSWORD_CRYPT_SIZE];
 	UINT8 clear = 0;
 	UINT32 length;
 	CHAR16 line[1];
 
-	if (MokPWSize != SHA256_DIGEST_SIZE && MokPWSize != PASSWORD_HASH_SIZE) {
+	if (MokPWSize != SHA256_DIGEST_SIZE && MokPWSize != PASSWORD_CRYPT_SIZE) {
 		Print(L"Invalid MokPW variable contents\n");
 		return -1;
 	}
 
 	uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
 
-	SetMem(hash, PASSWORD_HASH_SIZE, 0);
+	SetMem(hash, PASSWORD_CRYPT_SIZE, 0);
 
-	if (MokPWSize == PASSWORD_HASH_SIZE) {
-		if (CompareMem(MokPW, hash, PASSWORD_HASH_SIZE) == 0)
+	if (MokPWSize == PASSWORD_CRYPT_SIZE) {
+		if (CompareMem(MokPW, hash, PASSWORD_CRYPT_SIZE) == 0)
 			clear = 1;
 	} else {
 		if (CompareMem(MokPW, hash, SHA256_DIGEST_SIZE) == 0)
@@ -1136,8 +1134,8 @@ static INTN mok_pw_prompt (void *MokPW, void *data2, void *data3) {
 		return 0;
 	}
 
-	if (MokPWSize == PASSWORD_HASH_SIZE) {
-		efi_status = match_password((PASSWORD_HASH *)MokPW, NULL, 0,
+	if (MokPWSize == PASSWORD_CRYPT_SIZE) {
+		efi_status = match_password((PASSWORD_CRYPT *)MokPW, NULL, 0,
 					    NULL, L"Confirm MOK passphrase: ");
 	} else {
 		efi_status = match_password(NULL, NULL, 0, MokPW,
@@ -1754,8 +1752,8 @@ static BOOLEAN verify_pw(void)
 {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS efi_status;
-	UINT8 pwhash[PASSWORD_HASH_SIZE];
-	UINTN size = PASSWORD_HASH_SIZE;
+	UINT8 pwhash[PASSWORD_CRYPT_SIZE];
+	UINTN size = PASSWORD_CRYPT_SIZE;
 	UINT32 attributes;
 
 	efi_status = uefi_call_wrapper(RT->GetVariable, 5, L"MokPWStore",
@@ -1768,7 +1766,7 @@ static BOOLEAN verify_pw(void)
 	 * purely because of a failure to read the variable
 	 */
 	if (efi_status != EFI_SUCCESS ||
-	    (size != SHA256_DIGEST_SIZE && size != PASSWORD_HASH_SIZE))
+	    (size != SHA256_DIGEST_SIZE && size != PASSWORD_CRYPT_SIZE))
 		return TRUE;
 
 	if (attributes & EFI_VARIABLE_RUNTIME_ACCESS)
@@ -1776,8 +1774,8 @@ static BOOLEAN verify_pw(void)
 
 	uefi_call_wrapper(ST->ConOut->ClearScreen, 1, ST->ConOut);
 
-	if (size == PASSWORD_HASH_SIZE) {
-		efi_status = match_password((PASSWORD_HASH *)pwhash, NULL, 0,
+	if (size == PASSWORD_CRYPT_SIZE) {
+		efi_status = match_password((PASSWORD_CRYPT *)pwhash, NULL, 0,
 					    NULL, L"Enter MOK password: ");
 	} else {
 		efi_status = match_password(NULL, NULL, 0, pwhash,
@@ -1803,8 +1801,8 @@ static EFI_STATUS enter_mok_menu(EFI_HANDLE image_handle,
 	UINTN menucount = 3, i = 0;
 	EFI_STATUS efi_status;
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
-	UINT8 auth[PASSWORD_HASH_SIZE];
-	UINTN auth_size = PASSWORD_HASH_SIZE;
+	UINT8 auth[PASSWORD_CRYPT_SIZE];
+	UINTN auth_size = PASSWORD_CRYPT_SIZE;
 	UINT32 attributes;
 
 	if (verify_pw() == FALSE)
@@ -1815,7 +1813,7 @@ static EFI_STATUS enter_mok_menu(EFI_HANDLE image_handle,
 					       &attributes, &auth_size, auth);
 
 	if ((efi_status == EFI_SUCCESS) &&
-	    (auth_size == SHA256_DIGEST_SIZE || auth_size == PASSWORD_HASH_SIZE))
+	    (auth_size == SHA256_DIGEST_SIZE || auth_size == PASSWORD_CRYPT_SIZE))
 		MokAuth = 1;
 
 	efi_status = uefi_call_wrapper(RT->GetVariable, 5, L"MokDelAuth",
@@ -1823,7 +1821,7 @@ static EFI_STATUS enter_mok_menu(EFI_HANDLE image_handle,
 					       &attributes, &auth_size, auth);
 
 	if ((efi_status == EFI_SUCCESS) &&
-	   (auth_size == SHA256_DIGEST_SIZE || auth_size == PASSWORD_HASH_SIZE))
+	   (auth_size == SHA256_DIGEST_SIZE || auth_size == PASSWORD_CRYPT_SIZE))
 		MokDelAuth = 1;
 
 	if (MokNew || MokAuth)

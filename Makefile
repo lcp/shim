@@ -32,8 +32,8 @@ TARGET	= shim.efi MokManager.efi.signed
 OBJS	= shim.o netboot.o cert.o dbx.o
 KEYS	= shim_cert.h ocsp.* ca.* shim.crt shim.csr shim.p12 shim.pem shim.key
 SOURCES	= shim.c shim.h netboot.c signature.h PeImage.h
-MOK_OBJS = MokManager.o
-MOK_SOURCES = MokManager.c shim.h
+MOK_OBJS = MokManager.o PasswordCrypt.o
+MOK_SOURCES = MokManager.c shim.h PasswordCrypt.c PasswordCrypt.h
 
 all: $(TARGET)
 
@@ -65,7 +65,7 @@ dbx.o : dbx.S
 shim.so: $(OBJS) Cryptlib/libcryptlib.a Cryptlib/OpenSSL/libopenssl.a
 	$(LD) -o $@ $(LDFLAGS) $^ $(EFI_LIBS)
 
-MokManager.o: $(SOURCES)
+MokManager.o: $(MOK_SOURCES)
 
 MokManager.so: $(MOK_OBJS) Cryptlib/libcryptlib.a Cryptlib/OpenSSL/libopenssl.a
 	$(LD) -o $@ $(LDFLAGS) $^ $(EFI_LIBS)
