@@ -640,9 +640,10 @@ static EFI_STATUS match_password (PASSWORD_CRYPT *pw_crypt,
 		 * Compute password hash
 		 */
 		if (pw_crypt) {
-			char pw_ascii[PASSWORD_MAX];
+			char pw_ascii[PASSWORD_MAX + 1];
 			for (i = 0; i < pw_length; i++)
 				pw_ascii[i] = (char)password[i];
+			pw_ascii[pw_length] = '\0';
 
 			status = password_crypt(pw_ascii, pw_length, pw_crypt, hash);
 		} else {
