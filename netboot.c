@@ -39,6 +39,7 @@
 #include "shim.h"
 #include "netboot.h"
 
+#define DEFAULT_LOADER "/grub.efi"
 
 static inline unsigned short int __swap16(unsigned short int x)
 {
@@ -229,7 +230,7 @@ static BOOLEAN extract_tftp_info(char *url)
 {
 	char *start, *end;
 	char ip6str[128];
-	char *template = "/grubx64.efi";
+	char *template = DEFAULT_LOADER;
 
 	if (strncmp((UINT8 *)url, (UINT8 *)"tftp://", 7)) {
 		Print(L"URLS MUST START WITH tftp://\n");
@@ -285,9 +286,11 @@ static EFI_STATUS parseDhcp6()
 
 static EFI_STATUS parseDhcp4()
 {
-	char *template = "/grubx64.efi";
-	char *tmp = AllocatePool(16);
+	char *template = DEFAULT_LOADER;
+	char *tmp;
+	int len = strlen((CHAR8 *)template);
 
+	tmp = AllocatePool(len+1);
 
 	if (!tmp)
 		return EFI_OUT_OF_RESOURCES;
@@ -295,8 +298,7 @@ static EFI_STATUS parseDhcp4()
 
 	memcpy(&tftp_addr.v4, pxe->Mode->DhcpAck.Dhcpv4.BootpSiAddr, 4);
 
-	memcpy(tmp, template, 12);
-	tmp[13] = '\0';
+	memcpy(tmp, template, len+1);
 	full_path = tmp;
 
 	/* Note we don't capture the filename option here because we know its shim.efi
