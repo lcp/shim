@@ -30,12 +30,14 @@ LDFLAGS		= -nostdlib -znocombreloc -T $(EFI_LDS) -shared -Bsymbolic -L$(EFI_PATH
 
 VERSION		= 0.2
 
-TARGET	= shim.efi MokManager.efi.signed MokManager.efi
+TARGET	= shim.efi MokManager.efi.signed MokManager.efi fallback.efi.signed fallback.efi
 OBJS	= shim.o netboot.o cert.o dbx.o
 KEYS	= shim_cert.h ocsp.* ca.* shim.crt shim.csr shim.p12 shim.pem shim.key
 SOURCES	= shim.c shim.h netboot.c signature.h PeImage.h
 MOK_OBJS = MokManager.o PasswordCrypt.o crypt_blowfish.o
 MOK_SOURCES = MokManager.c shim.h PasswordCrypt.c PasswordCrypt.h crypt_blowfish.c crypt_blowfish.h
+FALLBACK_OBJS = fallback.o
+FALLBACK_SRCS = fallback.c
 
 all: $(TARGET)
 
@@ -65,6 +67,11 @@ dbx.o : dbx.S
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 shim.so: $(OBJS) Cryptlib/libcryptlib.a Cryptlib/OpenSSL/libopenssl.a
+	$(LD) -o $@ $(LDFLAGS) $^ $(EFI_LIBS)
+
+fallback.o: $(FALLBACK_SRCS)
+
+fallback.so: $(FALLBACK_OBJS)
 	$(LD) -o $@ $(LDFLAGS) $^ $(EFI_LIBS)
 
 MokManager.o: $(MOK_SOURCES)
