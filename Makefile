@@ -28,7 +28,7 @@ LDFLAGS		= -nostdlib -znocombreloc -T $(EFI_LDS) -shared -Bsymbolic -L$(EFI_PATH
 
 VERSION		= 0.2
 
-TARGET	= shim.efi MokManager.efi.signed
+TARGET	= shim.efi MokManager.efi.signed MokManager.efi
 OBJS	= shim.o netboot.o cert.o dbx.o
 KEYS	= shim_cert.h ocsp.* ca.* shim.crt shim.csr shim.p12 shim.pem shim.key
 SOURCES	= shim.c shim.h netboot.c signature.h PeImage.h
