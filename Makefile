@@ -1,11 +1,13 @@
+export TOPDIR  := $(shell pwd)/
+
 ARCH		= $(shell uname -m | sed s,i[3456789]86,ia32,)
 
-SUBDIRS		= Cryptlib
+SUBDIRS		= Cryptlib efitools
 
 LIB_PATH	= /usr/lib64
 
 EFI_INCLUDE	= /usr/include/efi
-EFI_INCLUDES	= -nostdinc -ICryptlib -ICryptlib/Include -I$(EFI_INCLUDE) -I$(EFI_INCLUDE)/$(ARCH) -I$(EFI_INCLUDE)/protocol 
+EFI_INCLUDES	= -nostdinc -ICryptlib -ICryptlib/Include -Iefitools/include -I$(EFI_INCLUDE) -I$(EFI_INCLUDE)/$(ARCH) -I$(EFI_INCLUDE)/protocol
 EFI_PATH	= /usr/lib64
 
 LIB_GCC		= $(shell $(CC) -print-libgcc-file-name)
@@ -67,7 +69,7 @@ shim.so: $(OBJS) Cryptlib/libcryptlib.a Cryptlib/OpenSSL/libopenssl.a
 
 MokManager.o: $(MOK_SOURCES)
 
-MokManager.so: $(MOK_OBJS) Cryptlib/libcryptlib.a Cryptlib/OpenSSL/libopenssl.a
+MokManager.so: $(MOK_OBJS) Cryptlib/libcryptlib.a Cryptlib/OpenSSL/libopenssl.a efitools/lib/lib-efi.a
 	$(LD) -o $@ $(LDFLAGS) $^ $(EFI_LIBS)
 
 Cryptlib/libcryptlib.a:
@@ -75,6 +77,12 @@ Cryptlib/libcryptlib.a:
 
 Cryptlib/OpenSSL/libopenssl.a:
 	$(MAKE) -C Cryptlib/OpenSSL
+
+efitools/lib/lib-efi.a:
+	$(MAKE) -C efitools/lib
+
+efitools/lib/asn1/libasn1-efi.a:
+	$(MAKE) -C efitools/lib/asn1
 
 %.efi: %.so
 	objcopy -j .text -j .sdata -j .data \
@@ -94,6 +102,7 @@ Cryptlib/OpenSSL/libopenssl.a:
 clean:
 	$(MAKE) -C Cryptlib clean
 	$(MAKE) -C Cryptlib/OpenSSL clean
+	$(MAKE) -C efitools clean
 	rm -rf $(TARGET) $(OBJS) $(MOK_OBJS) $(KEYS) certdb
 	rm -f *.debug *.so
 

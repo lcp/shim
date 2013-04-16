@@ -1,0 +1,24 @@
+ARCH	   = $(shell uname -m)
+INCDIR	   = -I$(TOPDIR)efitools/include/ -I/usr/include/efi -I/usr/include/efi/$(ARCH) -I/usr/include/efi/protocol
+CPPFLAGS   = -DCONFIG_$(ARCH)
+CFLAGS	   = -O2 -fpic -Wall -fshort-wchar -fno-strict-aliasing -fno-merge-constants -mno-red-zone -fno-stack-protector -g
+LDFLAGS	   = -nostdlib
+LDFLAGS	  += -T $(LDSCRIPT) -shared -Bsymbolic $(CRTOBJS) -L $(CRTPATH)
+FORMAT	   = efi-app-$(ARCH)
+OBJCOPY	   = objcopy
+
+ifeq ($(ARCH),x86_64)
+  CFLAGS += -DEFI_FUNCTION_WRAPPER
+endif
+
+%.o: %.c
+	$(CC) $(INCDIR) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+
+%.efi.o: %.c
+	$(CC) $(INCDIR) $(CFLAGS) $(CPPFLAGS) -fno-toplevel-reorder -DBUILD_EFI -c $< -o $@
+
+%.efi.s: %.c
+	$(CC) -S $(INCDIR) $(CFLAGS) $(CPPFLAGS) -fno-toplevel-reorder -DBUILD_EFI -c $< -o $@
+
+%.a:
+	ar rcv $@ $^
