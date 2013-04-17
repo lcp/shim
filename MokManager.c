@@ -2,6 +2,8 @@
 #include <efilib.h>
 #include <Library/BaseCryptLib.h>
 #include <openssl/x509.h>
+#include <console.h>
+#include <simple_file.h>
 #include "shim.h"
 #include "signature.h"
 #include "PeImage.h"
@@ -17,8 +19,8 @@
 
 #define EFI_VARIABLE_APPEND_WRITE 0x00000040
 
-#define CERT_STRING L"Select an X509 certificate to enroll:\n\n"
-#define HASH_STRING L"Select a file to trust:\n\n"
+#define CERT_STRING L"Select an X509 certificate to enroll:"
+#define HASH_STRING L"Select a file to trust:"
 
 struct menu_item {
 	CHAR16 *text;
@@ -1318,8 +1320,6 @@ static UINTN verify_certificate(void *cert, UINTN size)
 
 	if (!(X509ConstructCertificate(cert, size, (UINT8 **) &X509Cert)) ||
 	    X509Cert == NULL) {
-		Print(L"Invalid X509 certificate\n");
-		Pause();
 		return FALSE;
 	}
 
@@ -1327,25 +1327,35 @@ static UINTN verify_certificate(void *cert, UINTN size)
 	return TRUE;
 }
 
-static INTN file_callback (void *data, void *data2, void *data3) {
-	EFI_FILE_INFO *buffer = NULL;
-	UINTN buffersize = 0, mokbuffersize;
-	EFI_STATUS status;
+static INTN find_file (void *data, void *data2, void *data3)
+{
+	EFI_HANDLE handle = NULL;
 	EFI_FILE *file;
-	CHAR16 *filename = data;
-	EFI_FILE *parent = data2;
+	EFI_STATUS status;
+	CHAR16 *title[2];
+	CHAR16 *filename;
 	BOOLEAN hash = !!data3;
+	EFI_FILE_INFO *buffer = NULL;
 	EFI_GUID file_info_guid = EFI_FILE_INFO_ID;
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_SIGNATURE_LIST *CertList;
 	EFI_SIGNATURE_DATA *CertData;
+	UINTN buffersize = 0, mokbuffersize;
 	void *mokbuffer = NULL;
 
-	status = uefi_call_wrapper(parent->Open, 5, parent, &file, filename,
-				   EFI_FILE_MODE_READ, 0);
+	title[0] = hash ? HASH_STRING : CERT_STRING;
+	title[1] = NULL;
 
-	if (status != EFI_SUCCESS)
-		return 1;
+	simple_file_selector(&handle, title, NULL, NULL, &filename);
+	if (filename == NULL) {
+		return 0;
+	}
+
+	status = simple_file_open(handle, filename, &file, EFI_FILE_MODE_READ);
+	if (status != EFI_SUCCESS) {
+		console_error (L"Failed to open file", status);
+		return 0;
+	}
 
 	status = uefi_call_wrapper(file->GetInfo, 4, file, &file_info_guid,
 				   &buffersize, buffer);
@@ -1357,8 +1367,10 @@ static INTN file_callback (void *data, void *data2, void *data3) {
 					   buffer);
 	}
 
-	if (!buffer)
+	if (!buffer) {
+		console_error (L"Failed to allocate buffer", EFI_OUT_OF_RESOURCES);
 		return 0;
+	}
 
 	buffersize = buffer->FileSize;
 
@@ -1372,35 +1384,46 @@ static INTN file_callback (void *data, void *data2, void *data3) {
 
 		status = LibLocateProtocol(&shim_guid, (VOID **)&shim_lock);
 
-		if (status != EFI_SUCCESS)
+		if (status != EFI_SUCCESS) {
+			console_error (L"Failed to locate shim protocol", status);
 			goto out;
+		}
 
 		mokbuffersize = sizeof(EFI_SIGNATURE_LIST) + sizeof(EFI_GUID) +
 			SHA256_DIGEST_SIZE;
 
 		mokbuffer = AllocatePool(mokbuffersize);
 
-		if (!mokbuffer)
+		if (!mokbuffer) {
+			console_error (L"Failed to allocate mokbuffer",
+				       EFI_OUT_OF_RESOURCES);
 			goto out;
+		}
 
 		binary = AllocatePool(buffersize);
 
 		status = uefi_call_wrapper(file->Read, 3, file, &buffersize,
 					   binary);
 
-		if (status != EFI_SUCCESS)
+		if (status != EFI_SUCCESS) {
+			console_error (L"Failed to read file", status);
 			goto out;
+		}
 
 		status = shim_lock->Context(binary, buffersize, &context);
 
-		if (status != EFI_SUCCESS)
+		if (status != EFI_SUCCESS) {
+			console_error (L"Failed to get EFI context", status);
 			goto out;
+		}
 
 		status = shim_lock->Hash(binary, buffersize, &context, sha256,
 					 sha1);
 
-		if (status != EFI_SUCCESS)
+		if (status != EFI_SUCCESS) {
+			console_error (L"Failed to compute hash", status);
 			goto out;
+		}
 
 		CertList = mokbuffer;
 		CertList->SignatureType = EfiHashSha256Guid;
@@ -1413,8 +1436,11 @@ static INTN file_callback (void *data, void *data2, void *data3) {
 			sizeof(EFI_GUID);
 		mokbuffer = AllocatePool(mokbuffersize);
 
-		if (!mokbuffer)
+		if (!mokbuffer) {
+			console_error (L"Failed to allocate mokbuffer",
+				       EFI_OUT_OF_RESOURCES);
 			goto out;
+		}
 
 		CertList = mokbuffer;
 		CertList->SignatureType = EfiCertX509Guid;
@@ -1422,8 +1448,10 @@ static INTN file_callback (void *data, void *data2, void *data3) {
 		status = uefi_call_wrapper(file->Read, 3, file, &buffersize,
 				 mokbuffer + sizeof(EFI_SIGNATURE_LIST) + 16);
 
-		if (status != EFI_SUCCESS)
+		if (status != EFI_SUCCESS) {
+			console_error (L"Failed to read file", status);
 			goto out;
+		}
 		CertData = (EFI_SIGNATURE_DATA *)(((UINT8 *)mokbuffer) +
 						  sizeof(EFI_SIGNATURE_LIST));
 	}
@@ -1433,8 +1461,11 @@ static INTN file_callback (void *data, void *data2, void *data3) {
 	CertData->SignatureOwner = shim_lock_guid;
 
 	if (!hash) {
-		if (!verify_certificate(CertData->SignatureData, buffersize))
+		if (!verify_certificate(CertData->SignatureData, buffersize)) {
+			console_error (L"Not a valid certificate",
+				       EFI_INVALID_PARAMETER);
 			goto out;
+		}
 	}
 
 	mok_enrollment_prompt(mokbuffer, mokbuffersize, FALSE);
@@ -1445,302 +1476,7 @@ out:
 	if (mokbuffer)
 		FreePool(mokbuffer);
 
-	return 0;
-}
-
-static INTN directory_callback (void *data, void *data2, void *data3) {
-	EFI_FILE_INFO *buffer = NULL;
-	UINTN buffersize = 0;
-	EFI_STATUS status;
-	UINTN dircount = 0, i = 0;
-	struct menu_item *dircontent;
-	EFI_FILE *dir;
-	CHAR16 *filename = data;
-	EFI_FILE *root = data2;
-	BOOLEAN hash = !!data3;
-
-	status = uefi_call_wrapper(root->Open, 5, root, &dir, filename,
-				   EFI_FILE_MODE_READ, 0);
-
-	if (status != EFI_SUCCESS)
-		return 1;
-
-	while (1) {
-		status = uefi_call_wrapper(dir->Read, 3, dir, &buffersize,
-					   buffer);
-
-		if (status == EFI_BUFFER_TOO_SMALL) {
-			buffer = AllocatePool(buffersize);
-			status = uefi_call_wrapper(dir->Read, 3, dir,
-						   &buffersize, buffer);
-		}
-
-		if (status != EFI_SUCCESS)
-			return 1;
-
-		if (!buffersize)
-			break;
-
-		if ((StrCmp(buffer->FileName, L".") == 0) ||
-		    (StrCmp(buffer->FileName, L"..") == 0))
-			continue;
-
-		dircount++;
-
-		FreePool(buffer);
-		buffersize = 0;
-	}
-
-	dircount++;
-
-	dircontent = AllocatePool(sizeof(struct menu_item) * dircount);
-
-	dircontent[0].text = StrDuplicate(L"..");
-	dircontent[0].callback = NULL;
-	dircontent[0].colour = EFI_YELLOW;
-	i++;
-
-	uefi_call_wrapper(dir->SetPosition, 2, dir, 0);
-
-	while (1) {
-		status = uefi_call_wrapper(dir->Read, 3, dir, &buffersize,
-					   buffer);
-
-		if (status == EFI_BUFFER_TOO_SMALL) {
-			buffer = AllocatePool(buffersize);
-			status = uefi_call_wrapper(dir->Read, 3, dir,
-						   &buffersize, buffer);
-		}
-
-		if (status != EFI_SUCCESS)
-			return 1;
-
-		if (!buffersize)
-			break;
-
-		if ((StrCmp(buffer->FileName, L".") == 0) ||
-		    (StrCmp(buffer->FileName, L"..") == 0))
-			continue;
-
-		if (buffer->Attribute & EFI_FILE_DIRECTORY) {
-			dircontent[i].text = StrDuplicate(buffer->FileName);
-			dircontent[i].callback = directory_callback;
-			dircontent[i].data = dircontent[i].text;
-			dircontent[i].data2 = dir;
-			dircontent[i].data3 = data3;
-			dircontent[i].colour = EFI_YELLOW;
-		} else {
-			dircontent[i].text = StrDuplicate(buffer->FileName);
-			dircontent[i].callback = file_callback;
-			dircontent[i].data = dircontent[i].text;
-			dircontent[i].data2 = dir;
-			dircontent[i].data3 = data3;
-			dircontent[i].colour = EFI_WHITE;
-		}
-
-		i++;
-		FreePool(buffer);
-		buffersize = 0;
-		buffer = NULL;
-	}
-
-	if (hash)
-		run_menu(HASH_STRING, 2, dircontent, dircount, 0);
-	else
-		run_menu(CERT_STRING, 2, dircontent, dircount, 0);
-
-	return 0;
-}
-
-static INTN filesystem_callback (void *data, void *data2, void *data3) {
-	EFI_FILE_INFO *buffer = NULL;
-	UINTN buffersize = 0;
-	EFI_STATUS status;
-	UINTN dircount = 0, i = 0;
-	struct menu_item *dircontent;
-	EFI_FILE *root = data;
-	BOOLEAN hash = !!data3;
-
-	uefi_call_wrapper(root->SetPosition, 2, root, 0);
-
-	while (1) {
-		status = uefi_call_wrapper(root->Read, 3, root, &buffersize,
-					   buffer);
-
-		if (status == EFI_BUFFER_TOO_SMALL) {
-			buffer = AllocatePool(buffersize);
-			status = uefi_call_wrapper(root->Read, 3, root,
-						   &buffersize, buffer);
-		}
-
-		if (status != EFI_SUCCESS)
-			return 1;
-
-		if (!buffersize)
-			break;
-
-		if ((StrCmp(buffer->FileName, L".") == 0) ||
-		    (StrCmp(buffer->FileName, L"..") == 0))
-			continue;
-
-		dircount++;
-
-		FreePool(buffer);
-		buffersize = 0;
-	}
-
-	dircount++;
-
-	dircontent = AllocatePool(sizeof(struct menu_item) * dircount);
-
-	dircontent[0].text = StrDuplicate(L"Return to filesystem list");
-	dircontent[0].callback = NULL;
-	dircontent[0].colour = EFI_YELLOW;
-	i++;
-
-	uefi_call_wrapper(root->SetPosition, 2, root, 0);
-
-	while (1) {
-		status = uefi_call_wrapper(root->Read, 3, root, &buffersize,
-					   buffer);
-
-		if (status == EFI_BUFFER_TOO_SMALL) {
-			buffer = AllocatePool(buffersize);
-			status = uefi_call_wrapper(root->Read, 3, root,
-						   &buffersize, buffer);
-		}
-
-		if (status != EFI_SUCCESS)
-			return 1;
-
-		if (!buffersize)
-			break;
-
-		if ((StrCmp(buffer->FileName, L".") == 0) ||
-		    (StrCmp(buffer->FileName, L"..") == 0))
-			continue;
-
-		if (buffer->Attribute & EFI_FILE_DIRECTORY) {
-			dircontent[i].text = StrDuplicate(buffer->FileName);
-			dircontent[i].callback = directory_callback;
-			dircontent[i].data = dircontent[i].text;
-			dircontent[i].data2 = root;
-			dircontent[i].data3 = data3;
-			dircontent[i].colour = EFI_YELLOW;
-		} else {
-			dircontent[i].text = StrDuplicate(buffer->FileName);
-			dircontent[i].callback = file_callback;
-			dircontent[i].data = dircontent[i].text;
-			dircontent[i].data2 = root;
-			dircontent[i].data3 = data3;
-			dircontent[i].colour = EFI_WHITE;
-		}
-
-		i++;
-		FreePool(buffer);
-		buffer = NULL;
-		buffersize = 0;
-	}
-
-	if (hash)
-		run_menu(HASH_STRING, 2, dircontent, dircount, 0);
-	else
-		run_menu(CERT_STRING, 2, dircontent, dircount, 0);
-
-	return 0;
-}
-
-static INTN find_fs (void *data, void *data2, void *data3) {
-	EFI_GUID fs_guid = SIMPLE_FILE_SYSTEM_PROTOCOL;
-	UINTN count, i;
-	UINTN OldSize, NewSize;
-	EFI_HANDLE *filesystem_handles = NULL;
-	struct menu_item *filesystems;
-	BOOLEAN hash = !!data3;
-
-	uefi_call_wrapper(BS->LocateHandleBuffer, 5, ByProtocol, &fs_guid,
-			  NULL, &count, &filesystem_handles);
-
-	if (!count || !filesystem_handles) {
-		Print(L"No filesystems?\n");
-		return 1;
-	}
-
-	count++;
-
-	filesystems = AllocatePool(sizeof(struct menu_item) * count);
-
-	filesystems[0].text = StrDuplicate(L"Exit");
-	filesystems[0].callback = NULL;
-	filesystems[0].colour = EFI_YELLOW;
-
-	for (i=1; i<count; i++) {
-		EFI_HANDLE fs = filesystem_handles[i-1];
-		EFI_FILE_IO_INTERFACE *fs_interface;
-		EFI_DEVICE_PATH *path;
-		EFI_FILE *root;
-		EFI_STATUS status;
-		CHAR16 *VolumeLabel = NULL;
-		EFI_FILE_SYSTEM_INFO *buffer = NULL;
-		UINTN buffersize = 0;
-		EFI_GUID file_info_guid = EFI_FILE_INFO_ID;
-
-		status = uefi_call_wrapper(BS->HandleProtocol, 3, fs, &fs_guid,
-					   (void **)&fs_interface);
-
-		if (status != EFI_SUCCESS || !fs_interface)
-			continue;
-
-		path = DevicePathFromHandle(fs);
-
-		status = uefi_call_wrapper(fs_interface->OpenVolume, 2,
-					   fs_interface, &root);
-
-		if (status != EFI_SUCCESS || !root)
-			continue;
-
-		status = uefi_call_wrapper(root->GetInfo, 4, root,
-					   &file_info_guid, &buffersize,
-					   buffer);
-
-		if (status == EFI_BUFFER_TOO_SMALL) {
-			buffer = AllocatePool(buffersize);
-			status = uefi_call_wrapper(root->GetInfo, 4, root,
-						   &file_info_guid,
-						   &buffersize, buffer);
-		}
-
-		if (status == EFI_SUCCESS)
-			VolumeLabel = buffer->VolumeLabel;
-
-		if (path)
-			filesystems[i].text = DevicePathToStr(path);
-		else
-			filesystems[i].text = StrDuplicate(L"Unknown device\n");
-		if (VolumeLabel) {
-			OldSize = (StrLen(filesystems[i].text) + 1) * sizeof(CHAR16);
-			NewSize = OldSize + StrLen(VolumeLabel) * sizeof(CHAR16);
-			filesystems[i].text = ReallocatePool(filesystems[i].text,
-							     OldSize, NewSize);
-			StrCat(filesystems[i].text, VolumeLabel);
-		}
-
-		if (buffersize)
-			FreePool(buffer);
-
-		filesystems[i].data = root;
-		filesystems[i].data2 = NULL;
-		filesystems[i].data3 = data3;
-		filesystems[i].callback = filesystem_callback;
-		filesystems[i].colour = EFI_YELLOW;
-	}
-
-	uefi_call_wrapper(BS->FreePool, 1, filesystem_handles);
-
-	if (hash)
-		run_menu(HASH_STRING, 2, filesystems, count, 0);
-	else
-		run_menu(CERT_STRING, 2, filesystems, count, 0);
+	simple_file_close(file);
 
 	return 0;
 }
@@ -1888,14 +1624,14 @@ static EFI_STATUS enter_mok_menu(EFI_HANDLE image_handle,
 
 	menu_item[i].text = StrDuplicate(L"Enroll key from disk");
 	menu_item[i].colour = EFI_WHITE;
-	menu_item[i].callback = find_fs;
+	menu_item[i].callback = find_file;
 	menu_item[i].data3 = (void *)FALSE;
 
 	i++;
 
 	menu_item[i].text = StrDuplicate(L"Enroll hash from disk");
 	menu_item[i].colour = EFI_WHITE;
-	menu_item[i].callback = find_fs;
+	menu_item[i].callback = find_file;
 	menu_item[i].data3 = (void *)TRUE;
 
 	i++;
