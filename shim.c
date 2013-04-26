@@ -41,6 +41,7 @@
 #include "signature.h"
 #include "netboot.h"
 #include "shim_cert.h"
+#include "ucs2.h"
 
 #define DEFAULT_LOADER L"\\grub.efi"
 #define MOK_MANAGER L"\\MokManager.efi"
