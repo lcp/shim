@@ -42,10 +42,14 @@
 #include "netboot.h"
 #include "shim_cert.h"
 #include "ucs2.h"
+#include "keygen.h"
 
 #define DEFAULT_LOADER L"\\grub.efi"
 #define FALLBACK L"\\fallback.efi"
 #define MOK_MANAGER L"\\MokManager.efi"
+
+#define S4KEY_BIT 2048
+#define S4KEY_DAY 7300
 
 static EFI_SYSTEM_TABLE *systab;
 static EFI_STATUS (EFIAPI *entry_point) (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table);
@@ -1521,6 +1525,12 @@ EFI_STATUS efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *passed_systab)
 	 * use of it
 	 */
 	efi_status = mirror_mok_list();
+
+	/* generate the key pair for S4 */
+	if (secure_mode() && setup_rand() == EFI_SUCCESS) {
+		copy_certs();
+		generate_new_keys (S4KEY_BIT, S4KEY_DAY);
+	}
 
 	/*
 	 * Hand over control to the second stage bootloader
