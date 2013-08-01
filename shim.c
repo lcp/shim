@@ -45,6 +45,7 @@
 #include "guid.h"
 #include "variables.h"
 #include "efiauthenticated.h"
+#include "security_policy.h"
 
 #define DEFAULT_LOADER L"\\grub.efi"
 #define FALLBACK L"\\fallback.efi"
@@ -1517,6 +1518,11 @@ EFI_STATUS efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *passed_systab)
 			  &shim_lock_interface);
 
 	/*
+	 * Install the security protocol hook
+	 */
+	security_policy_install(shim_verify);
+
+	/*
 	 * Enter MokManager if necessary
 	 */
 	efi_status = check_mok_request(image_handle);
@@ -1538,6 +1544,11 @@ EFI_STATUS efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *passed_systab)
 	 */
 	uefi_call_wrapper(BS->UninstallProtocolInterface, 3, handle,
 			  &shim_lock_guid, &shim_lock_interface);
+
+	/*
+	 * Clean up the security protocol hook
+	 */
+	security_policy_uninstall();
 
 	/*
 	 * Free the space allocated for the alternative 2nd stage loader
