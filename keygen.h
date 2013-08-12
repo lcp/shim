@@ -8,5 +8,6 @@ void collect_entropy (void);
 EFI_STATUS setup_rand (void);
 EFI_STATUS generate_new_keys (const int bits, const int days);
 EFI_STATUS copy_certs (void);
+BOOLEAN check_keygen_request (void);
 
 #endif

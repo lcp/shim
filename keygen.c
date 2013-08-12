@@ -375,8 +375,7 @@ EFI_STATUS generate_new_keys (const int bits, const int days)
 	status = uefi_call_wrapper(RT->SetVariable, 5, L"S4SignKey",
 				   &hibernate_var,
 				   EFI_VARIABLE_NON_VOLATILE |
-				   EFI_VARIABLE_BOOTSERVICE_ACCESS |
-				   EFI_VARIABLE_RUNTIME_ACCESS,
+				   EFI_VARIABLE_BOOTSERVICE_ACCESS,
 				   pkcs8->length, pkcs8->data);
 	if (status != EFI_SUCCESS) {
 		Print(L"Failed to write S4SignKey\n");
@@ -414,6 +413,9 @@ EFI_STATUS copy_certs (void)
 		goto error;
 	}
 
+	/* Delete the variable anyway in case the attacker inserted the fake key in
+	   a non-volatile S4WakeKey */
+	LibDeleteVariable(L"S4WakeKey", &hibernate_var);
 	status = uefi_call_wrapper(RT->SetVariable, 5,
 				   L"S4WakeKey",
 				   &hibernate_var,
@@ -430,4 +432,36 @@ error:
 		FreePool(Data);
 
 	return status;
+}
+
+BOOLEAN check_keygen_request (void)
+{
+	EFI_GUID hibernate_var = EFI_HIBERNATE_GUID;
+	EFI_STATUS status;
+	UINTN len;
+	UINT8 Data;
+
+	len = 1;
+	status = uefi_call_wrapper(RT->GetVariable, 5, L"GenS4Key",
+				   &hibernate_var, NULL, &len, &Data);
+	LibDeleteVariable(L"GenS4Key", &hibernate_var);
+	if (status == EFI_SUCCESS && Data == 1) {
+		return TRUE;
+	}
+
+	len = 0;
+	status = uefi_call_wrapper(RT->GetVariable, 5, L"S4SignKey",
+				   &hibernate_var, NULL, &len, NULL);
+	if (status != EFI_BUFFER_TOO_SMALL) {
+		return TRUE;
+	}
+
+	len = 0;
+	status = uefi_call_wrapper(RT->GetVariable, 5, L"NextWakeKey",
+				   &hibernate_var, NULL, &len, NULL);
+	if (status != EFI_BUFFER_TOO_SMALL) {
+		return TRUE;
+	}
+
+	return FALSE;
 }

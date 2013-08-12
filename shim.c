@@ -1541,7 +1541,8 @@ EFI_STATUS efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *passed_systab)
 	/* generate the key pair for S4 */
 	if (secure_mode() && setup_rand() == EFI_SUCCESS) {
 		copy_certs();
-		generate_new_keys (S4KEY_BIT, S4KEY_DAY);
+		if (check_keygen_request())
+			generate_new_keys (S4KEY_BIT, S4KEY_DAY);
 	}
 
 	/*
