@@ -9,9 +9,12 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include <openssl/rand.h>
+#include <openssl/sha.h>
 
 #include "shim.h"
 #include "keygen.h"
+
+static UINT8 seed[SHA512_DIGEST_LENGTH];
 
 static EFI_STATUS get_variable (CHAR16 *name, EFI_GUID guid, UINT32 *attributes,
 				UINTN *size, void **buffer)
@@ -39,28 +42,133 @@ static EFI_STATUS get_variable (CHAR16 *name, EFI_GUID guid, UINT32 *attributes,
 	return efi_status;
 }
 
-EFI_STATUS setup_rand (void)
+static EFI_STATUS sha512sum (void *Data, UINTN DataSize, UINT8 *hash)
+{
+	EFI_STATUS status;
+	SHA512_CTX ctx;
+
+	if (!SHA512_Init(&ctx)) {
+		Print(L"Unable to initialise hash");
+		status = EFI_OUT_OF_RESOURCES;
+		goto done;
+	}
+
+	if (Data && DataSize) {
+		if (!(SHA512_Update(&ctx, Data, DataSize))) {
+			Print(L"Unable to generate hash");
+			status = EFI_OUT_OF_RESOURCES;
+			goto done;
+		}
+	}
+
+	if (!(SHA512_Final(hash, &ctx))) {
+		Print(L"Unable to finalise hash");
+		status = EFI_OUT_OF_RESOURCES;
+		goto done;
+	}
+
+	status = EFI_SUCCESS;
+done:
+	return status;
+}
+
+static __inline__ unsigned rdtsc (void)
+{
+	unsigned hi, lo;
+
+	__asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+
+	return lo;
+}
+
+void collect_entropy (void)
+{
+	unsigned count, shift;
+
+	count = rdtsc();
+	shift = rdtsc() % (SHA512_DIGEST_LENGTH - sizeof(unsigned));
+
+	CopyMem(seed+shift, &count, sizeof(unsigned));
+	sha512sum(seed, SHA512_DIGEST_LENGTH, seed);
+
+	RandomSeed(seed, sizeof(seed));
+}
+
+static __inline__ void cpuid (unsigned info, unsigned *eax, unsigned *ebx,
+			      unsigned *ecx, unsigned *edx)
+{
+	__asm__("xchg %%ebx, %%edi;"
+		"cpuid;"
+		"xchg %%ebx, %%edi;"
+		:"=a" (*eax), "=D" (*ebx), "=c" (*ecx), "=d" (*edx)
+		:"0" (info));
+}
+
+static BOOLEAN rdrand_support ()
+{
+	unsigned int eax, ebx, ecx, edx;
+
+	cpuid(1, &eax, &ebx, &ecx, &edx);
+	if ((ecx & 0x40000000) == 0x40000000)
+		return TRUE;
+	return FALSE;
+}
+
+static __inline__ int rdrand64_step (UINT64 *therand)
+{
+	unsigned char err;
+
+	__asm__ __volatile__("rdrand %0 ; setc %1"
+			     : "=r" (*therand), "=qm" (err));
+
+	return (int)err;
+}
+
+static void rdrand_seed (void)
+{
+	UINT8 hw_seed[SHA512_DIGEST_LENGTH];
+	UINT64 therand;
+	int i;
+
+	for (i = 0; i < (SHA512_DIGEST_LENGTH / sizeof(UINT64)); i++) {
+		rdrand64_step(&therand);
+		CopyMem((hw_seed + i*sizeof(UINT64)), &therand, sizeof(UINT64));
+	}
+
+	RandomSeed(hw_seed, sizeof(hw_seed));
+}
+
+static EFI_STATUS time_base_seed (void)
 {
 	EFI_TIME time;
 	EFI_STATUS efi_status;
-	CHAR16 seed[43];
-	UINT32 shift, size;
+	UINT32 shift, mod;
 
 	efi_status = uefi_call_wrapper(RT->GetTime, 2, &time, NULL);
-
 	if (efi_status != EFI_SUCCESS)
 		return efi_status;
 
-	shift = time.Second % 12;
-	size = sizeof(seed) - (shift * sizeof(CHAR16));
-	SPrint (seed + shift, size, L"%4d%02d%02d%02d%02d%02d%d",
-	        time.Year, time.Month, time.Day, time.Hour, time.Minute,
-	        time.Second, time.Daylight);
+	mod = sizeof(seed) - sizeof(EFI_TIME);
+	shift = rdtsc() % mod;
 
-	if (!RandomSeed((UINT8 *)seed, sizeof(seed)))
+	CopyMem((void *)seed+shift, (void *)&time, sizeof(EFI_TIME));
+
+	efi_status = sha512sum(seed, SHA512_DIGEST_LENGTH, seed);
+	if (efi_status != EFI_SUCCESS)
+		return efi_status;
+
+	if (!RandomSeed(seed, sizeof(seed)))
 		return EFI_ABORTED;
 
 	return EFI_SUCCESS;
+}
+
+EFI_STATUS setup_rand (void)
+{
+	if (rdrand_support())
+		rdrand_seed();
+
+	return time_base_seed();
 }
 
 static ASN1_INTEGER *generate_serial (void)

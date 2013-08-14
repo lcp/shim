@@ -1491,14 +1491,20 @@ EFI_STATUS efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *passed_systab)
 	 */
 	InitializeLib(image_handle, systab);
 
+	collect_entropy();
+
 	/* Set the second stage loader */
 	set_second_stage (image_handle);
+
+	collect_entropy();
 
 	/*
 	 * Check whether the user has configured the system to run in
 	 * insecure mode
 	 */
 	check_mok_sb();
+
+	collect_entropy();
 
 	/*
 	 * Tell the user that we're in insecure mode if necessary
@@ -1515,16 +1521,22 @@ EFI_STATUS efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *passed_systab)
 			  &shim_lock_guid, EFI_NATIVE_INTERFACE,
 			  &shim_lock_interface);
 
+	collect_entropy();
+
 	/*
 	 * Enter MokManager if necessary
 	 */
 	efi_status = check_mok_request(image_handle);
+
+	collect_entropy();
 
 	/*
 	 * Copy the MOK list to a runtime variable so the kernel can make
 	 * use of it
 	 */
 	efi_status = mirror_mok_list();
+
+	collect_entropy();
 
 	/* generate the key pair for S4 */
 	if (secure_mode() && setup_rand() == EFI_SUCCESS) {
