@@ -37,3 +37,6 @@ typedef struct _SHIM_LOCK {
 
 extern EFI_STATUS shim_init(void);
 extern void shim_fini(void);
+extern EFI_STATUS verify_mok (void);
+extern BOOLEAN verify_x509(UINT8 *Cert, UINTN CertSize);
+extern int image_is_64_bit(const EFI_IMAGE_OPTIONAL_HEADER_UNION *PEHdr);

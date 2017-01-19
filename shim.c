@@ -52,6 +52,10 @@
 #include "console.h"
 #include "version.h"
 
+#if defined(ENABLE_SV_VERIFY)
+#include "svlist.h"
+#endif
+
 #include <stdarg.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
@@ -169,8 +173,8 @@ allow_32_bit(void)
 #endif
 }
 
-static int
-image_is_64_bit(EFI_IMAGE_OPTIONAL_HEADER_UNION *PEHdr)
+int
+image_is_64_bit(const EFI_IMAGE_OPTIONAL_HEADER_UNION *PEHdr)
 {
 	/* .Magic is the same offset in all cases */
 	if (PEHdr->Pe32Plus.OptionalHeader.Magic
@@ -371,7 +375,7 @@ static EFI_STATUS relocate_coff (PE_COFF_LOADER_IMAGE_CONTEXT *context,
 	return EFI_SUCCESS;
 }
 
-static BOOLEAN verify_x509(UINT8 *Cert, UINTN CertSize)
+BOOLEAN verify_x509(UINT8 *Cert, UINTN CertSize)
 {
 	UINTN length;
 
@@ -925,7 +929,7 @@ done:
 /*
  * Ensure that the MOK database hasn't been set or modified from an OS
  */
-static EFI_STATUS verify_mok (void) {
+EFI_STATUS verify_mok (void) {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS status = EFI_SUCCESS;
 	UINT8 *MokListData = NULL;
@@ -1709,6 +1713,12 @@ EFI_STATUS shim_verify (void *buffer, UINT32 size)
 		goto done;
 
 	status = verify_buffer(buffer, size, &context);
+#if defined(ENABLE_SV_VERIFY)
+	if (status != EFI_SUCCESS)
+		goto done;
+
+	status = check_security_version(context.PEHdr);
+#endif
 done:
 	in_protocol = 0;
 	return status;
@@ -2760,6 +2770,14 @@ efi_main (EFI_HANDLE passed_image_handle, EFI_SYSTEM_TABLE *passed_systab)
 				  0, NULL);
 	}
 
+#if defined(ENABLE_SV_VERIFY)
+	/*
+	 * Check the device path of the boot device and determine whether to
+	 * verify Security Version or not.
+	 */
+	check_boot_device(image_handle);
+#endif
+
 	/*
 	 * Tell the user that we're in insecure mode if necessary
 	 */
@@ -2767,6 +2785,13 @@ efi_main (EFI_HANDLE passed_image_handle, EFI_SYSTEM_TABLE *passed_systab)
 		Print(L"Booting in insecure mode\n");
 		uefi_call_wrapper(BS->Stall, 1, 2000000);
 	}
+
+#if defined(ENABLE_SV_VERIFY)
+	/*
+	 * Merge the Security Version list
+	 */
+	efi_status = check_svlist_request();
+#endif
 
 	/*
 	 * Enter MokManager if necessary
@@ -2786,6 +2811,14 @@ efi_main (EFI_HANDLE passed_image_handle, EFI_SYSTEM_TABLE *passed_systab)
 	 * make use of it
 	 */
 	efi_status = mirror_mok_sb_state();
+
+#if defined(ENABLE_SV_VERIFY)
+	/*
+	 * Copy the Security version list to a runtime variable so the
+	 * user space program can make use of it
+	 */
+	efi_status = mirror_svlist();
+#endif
 
 	/*
 	 * Create the runtime MokIgnoreDB variable so the kernel can
