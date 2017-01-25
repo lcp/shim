@@ -201,7 +201,7 @@ static EFI_STATUS new_sv_prompt(const UINT32 signer, const UINT16 dv,
 		list->nodes[list_n].sv = sv;
 
 		FreePool(*sl_data);
-		sl_data = &new_sl_data;
+		*sl_data = new_sl_data;
 		*sl_size += sizeof(svnode_t);
 	} else {
 		new_sl_data = AllocatePool(*sl_size + NEW_LIST_SIZE);
@@ -217,7 +217,7 @@ static EFI_STATUS new_sv_prompt(const UINT32 signer, const UINT16 dv,
 		list->nodes[0].sv = sv;
 
 		FreePool(*sl_data);
-		sl_data = &new_sl_data;
+		*sl_data = new_sl_data;
 		*sl_size += NEW_LIST_SIZE;
 	}
 
