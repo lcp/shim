@@ -294,6 +294,33 @@ static svnode_t *match_dv(svlist_t *list, UINT16 dv)
 }
 
 /*
+ * Copy the boot-services only SVList variable to the runtime-accessible
+ * SVListRT variable. It's not marked NV, so the OS can't modify it.
+ */
+static EFI_STATUS mirror_svlist()
+{
+	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
+	EFI_STATUS status;
+	UINT8 *Data = NULL;
+	UINTN DataSize = 0;
+
+	status = load_svlist(&Data, &DataSize);
+	if (status != EFI_SUCCESS)
+		return status;
+
+	status = uefi_call_wrapper(RT->SetVariable, 5, L"SVListRT",
+				   &shim_lock_guid,
+				   EFI_VARIABLE_BOOTSERVICE_ACCESS
+				   | EFI_VARIABLE_RUNTIME_ACCESS,
+				   DataSize, Data);
+	if (status != EFI_SUCCESS) {
+		console_error(L"Failed to set SVListRT", status);
+	}
+
+	return status;
+}
+
+/*
  * Check the Security version of the image
  */
 EFI_STATUS check_security_version(const EFI_IMAGE_OPTIONAL_HEADER_UNION *PEHdr)
@@ -371,6 +398,9 @@ EFI_STATUS check_security_version(const EFI_IMAGE_OPTIONAL_HEADER_UNION *PEHdr)
 exit:
 	if (sl_data)
 		FreePool(sl_data);
+
+	if (status == EFI_SUCCESS)
+		mirror_svlist();
 
 	return status;
 }
@@ -718,31 +748,4 @@ EFI_STATUS check_boot_device(const EFI_HANDLE image_handle)
 	sv_verify = 0;
 
 	return EFI_SUCCESS;
-}
-
-/*
- * Copy the boot-services only SVList variable to the runtime-accessible
- * SVListRT variable. It's not marked NV, so the OS can't modify it.
- */
-EFI_STATUS mirror_svlist()
-{
-	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
-	EFI_STATUS status;
-	UINT8 *Data = NULL;
-	UINTN DataSize = 0;
-
-	status = load_svlist(&Data, &DataSize);
-	if (status != EFI_SUCCESS)
-		return status;
-
-	status = uefi_call_wrapper(RT->SetVariable, 5, L"SVListRT",
-				   &shim_lock_guid,
-				   EFI_VARIABLE_BOOTSERVICE_ACCESS
-				   | EFI_VARIABLE_RUNTIME_ACCESS,
-				   DataSize, Data);
-	if (status != EFI_SUCCESS) {
-		console_error(L"Failed to set SVListRT", status);
-	}
-
-	return status;
 }

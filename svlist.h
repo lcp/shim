@@ -56,6 +56,5 @@ count_nodes (const svlist_t *list)
 EFI_STATUS check_security_version(const EFI_IMAGE_OPTIONAL_HEADER_UNION *PEHdr);
 EFI_STATUS check_boot_device(const EFI_HANDLE image_handle);
 EFI_STATUS check_svlist_request();
-EFI_STATUS mirror_svlist();
 
 #endif /* __SVLIST_H__ */

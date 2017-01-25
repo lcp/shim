@@ -2812,14 +2812,6 @@ efi_main (EFI_HANDLE passed_image_handle, EFI_SYSTEM_TABLE *passed_systab)
 	 */
 	efi_status = mirror_mok_sb_state();
 
-#if defined(ENABLE_SV_VERIFY)
-	/*
-	 * Copy the Security version list to a runtime variable so the
-	 * user space program can make use of it
-	 */
-	efi_status = mirror_svlist();
-#endif
-
 	/*
 	 * Create the runtime MokIgnoreDB variable so the kernel can
 	 * make use of it
