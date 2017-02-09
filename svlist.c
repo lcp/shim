@@ -134,10 +134,11 @@ static svlist_t *match_signer(const UINT8 *data, const UINTN datasize,
 
 	while (skip < datasize) {
 		list = (svlist_t *)(data + skip);
-		skip += list->size;
 
-		if (CompareMem(list->signer, &signer, 4) != 0)
+		if (CompareMem(list->signer, &signer, 4) != 0) {
+			skip += list->size;
 			continue;
+		}
 
 		*offset = skip;
 		return list;
@@ -533,20 +534,20 @@ static EFI_STATUS merge_new_nodes(UINT8 *data, UINTN *size, const UINTN offset,
 	UINTN off_s = offset + cur->size;
 	UINT8 *src = (UINT8 *)(data + off_s);
 	UINT8 *dst = (UINT8 *)(src + extra * sizeof(svnode_t));
-	for (i = *size - off_s; i > 0; i++)
+	for (i = *size - off_s; i > 0; i--)
 		dst[i-1] = src[i-1];
 
 	/* 2nd round
 	 * Append the unmerged nodes */
 	cur->size += extra * sizeof(svnode_t);
 	*size += extra * sizeof(svnode_t);
-	for (i = new_n; i >= 0; i--) {
-		if (merged[i])
+	for (i = new_n; i > 0; i--) {
+		if (merged[i-1])
 			continue;
 
 		extra--;
-		cur->nodes[cur_n + extra].dv = new->nodes[i].dv;
-		cur->nodes[cur_n + extra].sv = new->nodes[i].sv;
+		cur->nodes[cur_n + extra].dv = new->nodes[i-1].dv;
+		cur->nodes[cur_n + extra].sv = new->nodes[i-1].sv;
 	}
 
 exit:
