@@ -598,7 +598,7 @@ static EFI_STATUS merge_svlistnew(const UINT8 *SVNew, const UINTN SVNewSize)
 		} else {
 			/* The signer doesn't exist. Append the list */
 			CopyMem(new_var + new_var_size, new_lptr, new_lptr->size);
-			new_var_size += cur_lptr->size;
+			new_var_size += new_lptr->size;
 		}
 
 		off_n += new_lptr->size;
