@@ -40,6 +40,8 @@
 #include "variables.h"
 #include "guid.h"
 
+#define LINE_SIZE 60
+
 extern UINT8 in_protocol;
 
 #define perror(fmt, ...) ({						\
@@ -86,23 +88,47 @@ static inline EFI_STATUS set_svlist(UINT8 *data, UINTN size)
 				 size, data);
 }
 
+static VOID set_signer_name (CHAR16 *line, const UINT32 size,
+			     const UINT32 signer)
+{
+	UINT8 i, numeric;
+	CHAR8 *ptr;
+
+	ptr = (CHAR8 *)&signer;
+	numeric = 0;
+
+	for (i = 0; i < 4; i++) {
+		/* Check if this character is printable or not */
+		if (ptr[i] < 0x20 || ptr[i] > 0x7E) {
+			numeric = 1;
+			break;
+		}
+	}
+
+	if (numeric) {
+		SPrint(line, size, L"Signer: 0x%02X 0x%02X 0x%02X 0x%02X",
+		       ptr[0], ptr[1], ptr[2], ptr[3]);
+	} else {
+		SPrint(line, size, L"Signer Name: %c%c%c%c",
+		       ptr[0], ptr[1], ptr[2], ptr[3]);
+	}
+}
+
 static EFI_STATUS lower_sv_prompt(const UINT32 signer, const UINT16 dv,
 				  const UINT16 sv, UINT8 **sl_data,
 				  UINTN *sl_size, svnode_t *node)
 {
 	CHAR16 *lines[10];
-	CHAR16 signer_l[80], dv_l[80], sv_l1[80], sv_l2[80];
-	CHAR8 *ptr;
+	CHAR16 signer_l[LINE_SIZE], dv_l[LINE_SIZE];
+	CHAR16 sv_l1[LINE_SIZE], sv_l2[LINE_SIZE];
 
 	if (!node)
 		return EFI_ACCESS_DENIED;
 
-	ptr = (CHAR8 *)&signer;
-	SPrint(signer_l, 80, L"Signer Name: %c%c%c%c", ptr[0], ptr[1],
-						       ptr[2], ptr[3]);
-	SPrint(dv_l, 80, L"Distro Version: %d", dv);
-	SPrint(sv_l1, 80, L"Accepted Security Version: %d", node->sv);
-	SPrint(sv_l2, 80, L"Security Version of this image: %d", sv);
+	set_signer_name(signer_l, LINE_SIZE, signer);
+	SPrint(dv_l, LINE_SIZE, L"Distro Version: %d", dv);
+	SPrint(sv_l1, LINE_SIZE, L"Accepted Security Version: %d", node->sv);
+	SPrint(sv_l2, LINE_SIZE, L"Security Version of this image: %d", sv);
 
 	lines[0] = L"Booting a less secure image";
 	lines[1] = L"";
@@ -152,15 +178,12 @@ static EFI_STATUS new_sv_prompt(const UINT32 signer, const UINT16 dv,
 				UINTN *sl_size, svlist_t *list, UINTN offset)
 {
 	CHAR16 *lines[8];
-	CHAR16 signer_l[80], dv_l[80], sv_l[80];
-	CHAR8 *ptr;
+	CHAR16 signer_l[LINE_SIZE], dv_l[LINE_SIZE], sv_l[LINE_SIZE];
 	UINT8 *new_sl_data;
 
-	ptr = (CHAR8 *)&signer;
-	SPrint(signer_l, 80, L"Signer Name: %c%c%c%c", ptr[0], ptr[1],
-						       ptr[2], ptr[3]);
-	SPrint(dv_l, 80, L"Distro Version: %d", dv);
-	SPrint(sv_l, 80, L"Security Version: %d", sv);
+	set_signer_name(signer_l, LINE_SIZE, signer);
+	SPrint(dv_l, LINE_SIZE, L"Distro Version: %d", dv);
+	SPrint(sv_l, LINE_SIZE, L"Security Version: %d", sv);
 
 	if (list)
 		lines[0] = L"Booting a image with a new distro version";
