@@ -126,9 +126,9 @@ static EFI_STATUS lower_sv_prompt(const UINT32 signer, const UINT16 dv,
 		return EFI_ACCESS_DENIED;
 
 	set_signer_name(signer_l, LINE_SIZE, signer);
-	SPrint(dv_l, LINE_SIZE, L"Distro Version: %d", dv);
-	SPrint(sv_l1, LINE_SIZE, L"Accepted Security Version: %d", node->sv);
-	SPrint(sv_l2, LINE_SIZE, L"Security Version of this image: %d", sv);
+	SPrint(dv_l, LINE_SIZE, L"Distro Version: 0x%04X", dv);
+	SPrint(sv_l1, LINE_SIZE, L"Accepted Security Version: 0x%04X", node->sv);
+	SPrint(sv_l2, LINE_SIZE, L"Security Version of this image: 0x%04X", sv);
 
 	lines[0] = L"Booting a less secure image";
 	lines[1] = L"";
@@ -182,8 +182,8 @@ static EFI_STATUS new_sv_prompt(const UINT32 signer, const UINT16 dv,
 	UINT8 *new_sl_data;
 
 	set_signer_name(signer_l, LINE_SIZE, signer);
-	SPrint(dv_l, LINE_SIZE, L"Distro Version: %d", dv);
-	SPrint(sv_l, LINE_SIZE, L"Security Version: %d", sv);
+	SPrint(dv_l, LINE_SIZE, L"Distro Version: 0x%04X", dv);
+	SPrint(sv_l, LINE_SIZE, L"Security Version: 0X%04X", sv);
 
 	if (list)
 		lines[0] = L"Booting a image with a new distro version";
