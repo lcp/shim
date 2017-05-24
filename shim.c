@@ -371,7 +371,7 @@ static EFI_STATUS relocate_coff (PE_COFF_LOADER_IMAGE_CONTEXT *context,
 	return EFI_SUCCESS;
 }
 
-static BOOLEAN verify_x509(UINT8 *Cert, UINTN CertSize)
+BOOLEAN verify_x509(UINT8 *Cert, UINTN CertSize)
 {
 	UINTN length;
 
@@ -925,7 +925,7 @@ done:
 /*
  * Ensure that the MOK database hasn't been set or modified from an OS
  */
-static EFI_STATUS verify_mok (void) {
+EFI_STATUS verify_mok(void) {
 	EFI_GUID shim_lock_guid = SHIM_LOCK_GUID;
 	EFI_STATUS status = EFI_SUCCESS;
 	UINT8 *MokListData = NULL;
