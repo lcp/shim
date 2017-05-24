@@ -44,6 +44,10 @@ ifneq ($(origin ENABLE_HTTPBOOT), undefined)
 	CFLAGS	+= -DENABLE_HTTPBOOT
 endif
 
+ifneq ($(origin ENABLE_SV_VERIFY), undefined)
+	CFLAGS	+= -DENABLE_SV_VERIFY
+endif
+
 ifeq ($(ARCH),x86_64)
 	CFLAGS	+= -mno-mmx -mno-sse -mno-red-zone -nostdinc \
 		-maccumulate-outgoing-args \
@@ -100,6 +104,11 @@ FALLBACK_SRCS = fallback.c
 ifneq ($(origin ENABLE_HTTPBOOT), undefined)
 	OBJS += httpboot.o
 	SOURCES += httpboot.c httpboot.h
+endif
+
+ifneq ($(origin ENABLE_SV_VERIFY), undefined)
+	OBJS += sv_verify.o
+	SOURCES += sv_verify.c sv_verify.h
 endif
 
 all: $(TARGET)

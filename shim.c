@@ -52,6 +52,10 @@
 #include "console.h"
 #include "version.h"
 
+#if defined(ENABLE_SV_VERIFY)
+#include "sv_verify.h"
+#endif
+
 #include <stdarg.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
@@ -1709,6 +1713,12 @@ EFI_STATUS shim_verify (void *buffer, UINT32 size)
 		goto done;
 
 	status = verify_buffer(buffer, size, &context);
+#if defined(ENABLE_SV_VERIFY)
+	if (status != EFI_SUCCESS)
+		goto done;
+
+	status = check_security_version(buffer, size);
+#endif
 done:
 	in_protocol = 0;
 	return status;
@@ -2760,6 +2770,14 @@ efi_main (EFI_HANDLE passed_image_handle, EFI_SYSTEM_TABLE *passed_systab)
 				  0, NULL);
 	}
 
+#if defined(ENABLE_SV_VERIFY)
+	/*
+	 * Check the device path of the boot device and determine whether to
+	 * verify Security Version or not.
+	 */
+	check_boot_device(image_handle);
+#endif
+
 	/*
 	 * Tell the user that we're in insecure mode if necessary
 	 */
@@ -2767,6 +2785,13 @@ efi_main (EFI_HANDLE passed_image_handle, EFI_SYSTEM_TABLE *passed_systab)
 		Print(L"Booting in insecure mode\n");
 		uefi_call_wrapper(BS->Stall, 1, 2000000);
 	}
+
+#if defined(ENABLE_SV_VERIFY)
+	/*
+	 * Merge the Security Version list
+	 */
+	efi_status = check_svlist_request();
+#endif
 
 	/*
 	 * Enter MokManager if necessary
