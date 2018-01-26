@@ -45,6 +45,16 @@ static EFI_PXE_BASE_CODE *pxe;
 static EFI_IP_ADDRESS tftp_addr;
 static CHAR8 *full_path;
 
+static CONST CHAR16 *TftpErrStr[] = {
+	L"(0)Undefined",
+	L"(1)File not found",
+	L"(2)Access violation",
+	L"(3)Disk full or allocation exceeded",
+	L"(4)Illegal TFTP operation",
+	L"(5)Unknown transfer ID",
+	L"(6)File already exists",
+	L"(7)No such user",
+};
 
 typedef struct {
 	UINT16 OpCode;
@@ -341,4 +351,19 @@ try_again:
 		FreePool(*buffer);
 	}
 	return rc;
+}
+
+CONST CHAR16 *FetchTftpErrStr()
+{
+	EFI_PXE_BASE_CODE_MODE *mode = pxe->Mode;
+	UINT8 error_code;
+
+	if (!mode->TftpErrorReceived)
+		return L"No error code received";
+
+	error_code = mode->TftpError.ErrorCode;
+	if (error_code >= (sizeof(TftpErrStr)/sizeof(TftpErrStr[0])))
+		return L"Undefined";
+
+	return TftpErrStr[error_code];
 }

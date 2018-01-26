@@ -1897,6 +1897,8 @@ EFI_STATUS start_image(EFI_HANDLE image_handle, CHAR16 *ImagePath)
 					       &sourcesize);
 		if (efi_status != EFI_SUCCESS) {
 			perror(L"Unable to fetch TFTP image: %r\n", efi_status);
+			if (efi_status == EFI_TFTP_ERROR)
+				perror(L"TFTP Error: %s\n", FetchTftpErrStr());
 			return efi_status;
 		}
 		data = sourcebuffer;
