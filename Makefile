@@ -247,7 +247,7 @@ ifneq ($(OBJCOPY_GTE224),1)
 endif
 	$(OBJCOPY) -D -j .text -j .sdata -j .data -j .data.ident \
 		-j .dynamic -j .rodata -j .rel* \
-		-j .rela* -j .reloc -j .eh_frame \
+		-j .rela* -j .dyn* -j .reloc -j .eh_frame \
 		-j .vendor_cert -j .sbat \
 		$(FORMAT) $< $@
 	./post-process-pe -vv $@
